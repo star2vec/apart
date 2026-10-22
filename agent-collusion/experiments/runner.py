@@ -19,7 +19,12 @@ from experiments.episode_schedules import (
     expand_verdict_policy_spans,
     expand_throttle_spans,
 )
-from experiments.llm import REASONING_EFFORT_CHOICES, validate_model_route
+from experiments.llm import (
+    LLM_CALL_LOG_FILENAME,
+    REASONING_EFFORT_CHOICES,
+    enable_call_log,
+    validate_model_route,
+)
 from experiments.memory.cross_episode import (
     CROSS_EPISODE_MEMORY_SCOPES,
     set_cross_episode_memory_from_results,
@@ -628,6 +633,7 @@ def _run_selected_episodes(
     log_progress(f"Saving incremental results to: {output_path}", True)
     temporary_run_id = sanitize_label(output_path.parent.name)
     usage_journal_path = output_path.parent / LLM_USAGE_JOURNAL_FILENAME
+    enable_call_log(output_path.parent / LLM_CALL_LOG_FILENAME)
     usage_invocation_id = (
         f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}_"
         f"{random.SystemRandom().randrange(16**6):06x}"

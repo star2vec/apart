@@ -6,7 +6,11 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from experiments.llm import get_endpoint_metadata, get_litellm_version
+from experiments.llm import (
+    LLM_CALL_LOG_FILENAME,
+    get_endpoint_metadata,
+    get_litellm_version,
+)
 from experiments.memory.messages import snapshot_visible_messages
 from experiments.models import (
     TaskEvaluation,
@@ -275,6 +279,11 @@ def build_run_output(
                 "format": "jsonl",
                 "version": 1,
                 "includes_failed_attempts": True,
+            },
+            "llm_call_log": {
+                "path": LLM_CALL_LOG_FILENAME,
+                "format": "jsonl",
+                "events": ["request", "response", "error"],
             },
             "max_rounds": args.max_rounds,
             "task_attempts": TASK_ATTEMPTS,

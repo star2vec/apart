@@ -5,11 +5,15 @@ This module adds route checks, metadata, cache breakpoints, and provider-specifi
 history handling without changing the stored conversation.
 """
 
+import json
 import os
+from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import Any, Callable, Iterable
 
 import litellm
+from litellm.integrations.custom_logger import CustomLogger
 
 from experiments.models import (
     DEFAULT_LLM_MAX_OUTPUT_TOKENS,
@@ -458,3 +462,75 @@ def get_endpoint_metadata(model: str) -> dict[str, str]:
     if api_base:
         metadata["api_base"] = api_base
     return metadata
+
+
+# Per-call wire log: the request body LiteLLM hands to the provider SDK and the raw
+# provider response, before LiteLLM converts it. One JSON object per line.
+LLM_CALL_LOG_FILENAME = "llm_calls.jsonl"
+
+
+class _CallLog(CustomLogger):
+    """Append each call's request, raw response, or error as soon as it happens.
+
+    LiteLLM invokes these hooks synchronously in the calling thread, so a record is
+    on disk before the next call starts. Credentials and headers are never written.
+    """
+
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        self.path = path
+        self.sequence = 0
+
+    def _write(self, event: str, kwargs: dict[str, Any], **fields: Any) -> None:
+        self.sequence += 1
+        record = {
+            "seq": self.sequence,
+            "event": event,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+            "litellm_call_id": kwargs.get("litellm_call_id"),
+            "model": kwargs.get("model"),
+            **fields,
+        }
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a", encoding="utf-8") as log:
+            log.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+            log.flush()
+            os.fsync(log.fileno())
+
+    def log_pre_api_call(self, model, messages, kwargs):
+        additional = kwargs.get("additional_args") or {}
+        body = dict(additional.get("complete_input_dict") or {})
+        # The OpenAI SDK merges extra_body into the top level of the JSON it sends.
+        body.update(body.pop("extra_body", None) or {})
+        self._write(
+            "request",
+            kwargs,
+            api_base=str(additional.get("api_base") or ""),
+            body=body,
+        )
+
+    def log_post_api_call(self, kwargs, response_obj, start_time, end_time):
+        original = kwargs.get("original_response")
+        if isinstance(original, str):
+            try:
+                original = json.loads(original)
+            except ValueError:
+                pass
+        self._write("response", kwargs, body=original)
+
+    def log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        exception = kwargs.get("exception")
+        self._write(
+            "error",
+            kwargs,
+            error_type=type(exception).__name__ if exception is not None else None,
+            error=str(exception) if exception is not None else None,
+        )
+
+
+def enable_call_log(path: Path) -> None:
+    """Route every later LiteLLM call in this process to the wire log at ``path``."""
+    call_log = _CallLog(path)
+    for hooks in (litellm.input_callback, litellm.failure_callback):
+        hooks[:] = [hook for hook in hooks if not isinstance(hook, _CallLog)]
+        hooks.append(call_log)

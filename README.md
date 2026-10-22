@@ -25,7 +25,14 @@ this project are listed below.
 
 ### Changes to agent-collusion
 
-None yet.
+1. **Per-call wire log** (`experiments/llm.py`, enabled in `experiments/runner.py`,
+   noted in `run_config.llm_call_log` by `experiments/output.py`). Each run directory gets
+   `llm_calls.jsonl` next to `run.json`: for every LiteLLM call, a `request` record with
+   the exact JSON body sent to the server (messages including replayed
+   `reasoning_content`, tools, `tool_choice`, sampling), then a `response` record with the
+   raw server response before LiteLLM's conversion (including vLLM's `reasoning` field),
+   or an `error` record. Records are fsync'd as each call happens, so they survive a run
+   that dies mid-episode. No credentials or headers are written.
 
 ## Model and serving
 
@@ -36,6 +43,7 @@ None yet.
 | Served name | `qwen3.6-27b` (LiteLLM route `openai/qwen3.6-27b`) |
 | Parsers | reasoning `qwen3`, tool calls `qwen3_coder` with auto tool choice |
 | `--max-model-len` | 131,072 (64,000 output + up to 67,072 prompt tokens) |
+| `--max-num-seqs` | 64 (default 1024 exceeds the 361 Mamba state blocks that fit) |
 | Sampling | temperature 1.0, max output tokens 64,000 (paper); top_p 0.95, top_k 20 from the model's generation config |
 
 Secrets live in Modal (`huggingface`, `vllm-api-key`) and in `agent-collusion/.env`,
