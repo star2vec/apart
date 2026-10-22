@@ -18,6 +18,11 @@ HF_HUB_VERSION = "2.1.1"
 # as a context-window error and drops the agent's oldest episode from memory.
 MAX_MODEL_LEN = 131_072
 
+# Each running sequence holds one Mamba (linear-attention) state block; on an H100 with
+# this max_model_len only ~361 fit, below vLLM's default of 1024. 8 runner processes
+# need at most ~16 in flight, so 64 leaves headroom without starving the KV cache.
+MAX_NUM_SEQS = 64
+
 # "H100!" pins an 80 GB H100 and stops Modal's silent upgrade to H200,
 # so timings stay comparable across runs.
 GPU = "H100!"

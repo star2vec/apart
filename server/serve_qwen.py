@@ -11,12 +11,14 @@ Secret: vllm-api-key -> VLLM_API_KEY (clients send it as the bearer token)
 import json
 import os
 import subprocess
+import threading
 
 import modal
 
 from pins import (
     GPU,
     MAX_MODEL_LEN,
+    MAX_NUM_SEQS,
     MODEL_ID,
     MODEL_REVISION,
     SERVED_MODEL_NAME,
@@ -29,7 +31,7 @@ from pins import (
 
 MINUTES = 60
 REQUEST_TIMEOUT = 60 * MINUTES  # hard cap per function input (one HTTP request)
-STARTUP_TIMEOUT = 30 * MINUTES  # cold start: load ~52 GiB, compile, capture graphs
+STARTUP_TIMEOUT = 15 * MINUTES  # cold start measured ~2.5 min (load, compile, graphs)
 SCALEDOWN_WINDOW = 5 * MINUTES  # idle time before the GPU container shuts down
 VLLM_PORT = 8000
 
@@ -78,6 +80,8 @@ def vllm_command() -> list[str]:
         "bfloat16",
         "--max-model-len",
         str(MAX_MODEL_LEN),
+        "--max-num-seqs",
+        str(MAX_NUM_SEQS),
         # Text-only game: skip loading the vision tower; text path is unchanged.
         "--language-model-only",
         "--reasoning-parser",
@@ -119,7 +123,16 @@ def serve() -> None:
     cmd = vllm_command()
     redacted = [("<redacted>" if a == os.environ["VLLM_API_KEY"] else a) for a in cmd]
     print("launching:", " ".join(redacted), flush=True)
-    subprocess.Popen(cmd)
+    process = subprocess.Popen(cmd)
+    threading.Thread(target=_exit_with, args=(process,), daemon=True).start()
+
+
+def _exit_with(process: subprocess.Popen) -> None:
+    """Kill the container as soon as vLLM exits, instead of idling the GPU until
+    startup_timeout runs out waiting for a port that will never open."""
+    code = process.wait()
+    print(f"vllm exited with code {code}; stopping container", flush=True)
+    os._exit(1)
 
 
 def server_config() -> dict:
@@ -133,6 +146,7 @@ def server_config() -> dict:
         "vllm_version": VLLM_VERSION,
         "vllm_image": VLLM_IMAGE,
         "max_model_len": MAX_MODEL_LEN,
+        "max_num_seqs": MAX_NUM_SEQS,
         "gpu": GPU,
         "reasoning_parser": "qwen3",
         "tool_call_parser": "qwen3_coder",
