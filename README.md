@@ -23,6 +23,8 @@ Qwen3.6-27B served with vLLM on Modal.
     ├── resample.py          # resample verdicts from fixed histories, for step 4 (plan unless --go)
     ├── setup_s6.sh          # setup S6 in one GPU start
     ├── step1_cache/         # step 1: rebuild comm prompts, positions, index; check and pack the download
+    ├── step2/               # step 2: probe at A, baselines, null, control, follow-ups
+    ├── step3/               # step 3: probe traced through the exchange, probe at C, transfer
     ├── paper_prompts/       # rebuild and render the paper's verdict calls
     └── requirements.txt     # analysis venv (tools/.venv), torch-free
 ```
@@ -49,7 +51,7 @@ On the paper's 50 Qwen 3.6 main trajectories and their judge labels.
 | --- | --- |
 | 1. Activation cache | done 2026-10-23: 200 passes (per run and agent: the last episode's communication-phase history and its last verdict prompt, each with its own phase's tool list), 14.26M tokens, whole passes (longest 93,645 tokens, peak 69.0 GiB); residual stream after layers 3, 7, …, 63 at 32,834 positions (A, A_call, every message end, C, verdict, feedback, reflection start/end, runner notices), 5.0 GiB bf16; index in `index.jsonl`. 39.6 H100-minutes, ~$2.61. Modal Volume `qwen36-activations:/cache-v1` |
 | 2. Probe at A | done (Mac): own verdict from A, 348 onset/before-onset rows, trajectory-grouped nested CV; selected-layer AUC 0.888 ± 0.023 vs feedback-features baseline 0.896 ± 0.020 (probe better in 9/25 folds), episode number 0.871, relaxation flag 0.818, shuffled null 0.504; positive control (previous reward) 0.924; probe + feedback 0.903 vs feedback 0.896 (+0.007, 19/25 folds), at A_call 0.910 (+0.013, 19/25). See `reports/2026-10-23-step2-probe-a.md` |
-| 3. Message-by-message probe, probe at C | |
+| 3. Message-by-message probe, probe at C | done (Mac): per-position probes at A, each of 10 message slots and C, out-of-fold per row with the feedback baseline as reference; the probe first beats the feedback baseline at C (0.956 vs 0.905, +0.051 [0.030, 0.071]), overall and on both paths; no message slot does. C probe 0.953 ± 0.018; A↔C transfer partial (A→C 0.70, C→A 0.74); A_call's edge over A sits with the first speaker. See `reports/2026-10-23-step3-trace-and-c.md` |
 | 4. Resampling session (vLLM) | |
 | 5. Agreement lines removed | |
 | 6. Projections session (transformers) | |
