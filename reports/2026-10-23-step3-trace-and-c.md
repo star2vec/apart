@@ -190,6 +190,40 @@ C-probe trace below).
 - So, for the agent who has just spoken, the verdict is visible in the last message it wrote.
   For the agent who has just read, the verdict appears only once the question is asked.
 
+### Text baselines for the last-message comparison
+
+Code: `tools/step3/text_baselines.py`; numbers in `agent-collusion/results/step3/text_baselines.json`.
+Setup:
+- the same 340 rows and trajectory folds as above;
+- word-count logistic regressions (vocabulary fitted on the training fold, L2 strength from inner
+  folds), one on the agent's own messages in the episode and one on all of the episode's messages;
+- the paper's agreement label as a single feature.
+
+Pooled AUC is on out-of-fold ranks; intervals for the probe's gain come from a trajectory
+bootstrap.
+
+| | Probe at s10 | Probe at C | Words, own messages | Words, all messages | Agreement label |
+|---|---|---|---|---|---|
+| Pooled | 0.908 | 0.956 | 0.890 | 0.905 | 0.689 |
+| Alice (s10 = Bob's message) | 0.862 | 0.943 | 0.869 | 0.889 | 0.656 |
+| Bob (s10 = his own message) | 0.951 | 0.969 | 0.910 | 0.921 | 0.723 |
+
+| Probe gain over | Words, own | Words, all | Agreement label |
+|---|---|---|---|
+| s10, pooled | +0.018 [−0.015, +0.056] | +0.004 [−0.028, +0.040] | +0.220 |
+| s10, Alice | −0.007 [−0.060, +0.052] | −0.027 [−0.074, +0.028] | +0.206 |
+| s10, Bob | +0.042 [−0.000, +0.091] | +0.031 [−0.008, +0.070] | +0.229 |
+| C, pooled | **+0.066 [+0.033, +0.099]** | **+0.051 [+0.019, +0.084]** | +0.267 |
+| C, Alice | **+0.074** | **+0.054** | +0.287 |
+| C, Bob | **+0.059** | **+0.048** | +0.246 |
+
+- At the last message the probe is about as good as the words of the messages. For Bob, at his
+  own final message, it sits slightly above his own words (+0.042, at the edge of significance).
+- So "readable in its own message" is mostly the words, with at most a small extra for the agent
+  who wrote it.
+- C beats every text baseline for both agents. The paper's agreement label alone predicts the
+  verdict only weakly (0.69).
+
 ## The C probe traced through the episode (one readout everywhere)
 
 Code: `tools/step3/trace_c_probe.py`; numbers in `trace_c_probe.json`; per-row scores in

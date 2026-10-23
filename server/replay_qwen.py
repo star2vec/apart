@@ -63,7 +63,8 @@ app = modal.App("qwen36-replay")
     timeout=60 * MINUTES,  # replaced per run by --timeout-min
     max_containers=1,
 )
-def capture(tag: str, layers: str, chunk: int, timeout_s: int, check_chunking: bool) -> dict:
+def capture(tag: str, layers: str, chunk: int, timeout_s: int, check_chunking: bool,
+            score_layer: int = -1, stop_after: int = -1, probes: bool = False) -> dict:
     started = time.time()
     acts_volume.reload()
     jobs_path = Path(ACTS_DIR) / tag / "inputs" / "jobs.jsonl.gz"
@@ -84,6 +85,10 @@ def capture(tag: str, layers: str, chunk: int, timeout_s: int, check_chunking: b
            "--chunk", str(chunk), "--deadline-s", str(int(deadline))]
     if check_chunking:
         cmd.append("--check-chunking")
+    if probes:
+        cmd += ["--probes", str(Path(ACTS_DIR) / tag / "inputs" / "probes.npz"), "--score-layer", str(score_layer)]
+    if stop_after >= 0:
+        cmd += ["--stop-after-layer", str(stop_after)]
     code = subprocess.run(cmd).returncode
     stop.set()
     committer.join()
@@ -96,7 +101,8 @@ def capture(tag: str, layers: str, chunk: int, timeout_s: int, check_chunking: b
 
 @app.local_entrypoint()
 def main(jobs: str, tag: str, layers: str = "all", go: bool = False, chunk: int = 0,
-         timeout_min: int = 60, check_chunking: bool = False, tokens_per_s: float = 5000.0) -> None:
+         timeout_min: int = 60, check_chunking: bool = False, tokens_per_s: float = 5000.0,
+         probes: str = "", score_layer: int = -1, stop_after_layer: int = -1) -> None:
     batch = [json.loads(line) for line in open(jobs)]
     for job in batch:
         if job.get("model_revision") != MODEL_REVISION:
@@ -108,6 +114,8 @@ def main(jobs: str, tag: str, layers: str = "all", go: bool = False, chunk: int 
     est_min = tokens / tokens_per_s / 60
     print(f"{len(batch)} passes, {tokens:,} tokens (longest {max(len(j['token_ids']) for j in batch):,}), "
           f"{positions:,} positions x {n_layers} layers = {gib:.2f} GiB, output {ACTS_VOLUME}:/{tag}/acts on {GPU}")
+    if probes:
+        print(f"probe scores at layer {score_layer} from {probes}; forward stops after layer {stop_after_layer}")
     print(f"forward time at {tokens_per_s:,.0f} tok/s: {est_min:.0f} min (+ image pull and weight load); "
           f"hard timeout {timeout_min} min = ${timeout_min / 60 * HOURLY_USD:.2f} at most")
     if not go:
@@ -120,11 +128,13 @@ def main(jobs: str, tag: str, layers: str = "all", go: bool = False, chunk: int 
             shutil.copyfileobj(src, dst)
         with acts_volume.batch_upload(force=True) as upload:
             upload.put_file(str(packed), f"/{tag}/inputs/jobs.jsonl.gz")
+            if probes:
+                upload.put_file(probes, f"/{tag}/inputs/probes.npz")
     print(f"uploaded jobs to {ACTS_VOLUME}:/{tag}/inputs/jobs.jsonl.gz", flush=True)
 
     t0 = time.time()
     result = capture.with_options(timeout=timeout_min * MINUTES).remote(
-        tag, layers, chunk, timeout_min * MINUTES, check_chunking)
+        tag, layers, chunk, timeout_min * MINUTES, check_chunking, score_layer, stop_after_layer, bool(probes))
     wall_min = (time.time() - t0) / 60
     log = result.pop("run_log") or {}
     print(json.dumps(result))

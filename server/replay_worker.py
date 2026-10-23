@@ -70,19 +70,28 @@ def load_jobs(path):
     return json.loads(text) if text.startswith("[") else [json.loads(l) for l in text.splitlines()]
 
 
-class Capture:
-    """Hooks that keep the residual stream at given absolute positions, chunk by chunk."""
+class StopForward(Exception):
+    """Raised after the last layer anyone needs, to skip the rest of the model."""
 
-    def __init__(self, layers, chosen, want_embed):
+
+class Capture:
+    """Hooks that keep the residual stream at given absolute positions, chunk by chunk.
+    Optionally scores every position in a range with a linear probe at one layer
+    (logit = h . w + b, float32) and stops the forward pass after a given layer."""
+
+    def __init__(self, layers, chosen, want_embed, score_layer=None, stop_after=None):
         self.layers, self.chosen, self.want_embed = layers, chosen, want_embed
+        self.score_layer, self.stop_after = score_layer, stop_after
+        self.score_spec, self.scores = None, []
         self.handles = []
 
     def __enter__(self):
         self.handles = []
         if self.want_embed:
             self.handles.append(self.layers[0].register_forward_pre_hook(self._pre))
-        for i in self.chosen:
-            self.handles.append(self.layers[i].register_forward_hook(self._post(f"resid_post.{i}")))
+        hooked = sorted(set(self.chosen) | {x for x in (self.score_layer, self.stop_after) if x is not None})
+        for i in hooked:
+            self.handles.append(self.layers[i].register_forward_hook(self._post(i)))
         return self
 
     def __exit__(self, *exc):
@@ -95,6 +104,11 @@ class Capture:
         self.rows = sel
         self.local = torch.tensor([positions[k] - start for k in sel], dtype=torch.long)
         self.store = store
+        self.chunk = (start, end)
+
+    def set_score(self, spec):
+        """spec: (start, end, w [hidden] tensor, b float) in absolute positions, or None."""
+        self.score_spec, self.scores = spec, []
 
     def _keep(self, name, hidden):
         if not self.rows:
@@ -107,9 +121,20 @@ class Capture:
     def _pre(self, module, args, kwargs=None):
         self._keep("resid_pre.0", args[0] if args else kwargs["hidden_states"])
 
-    def _post(self, name):
+    def _post(self, i):
         def hook(module, args, output):
-            self._keep(name, output[0] if isinstance(output, tuple) else output)
+            hidden = output[0] if isinstance(output, tuple) else output
+            if i in self.chosen:
+                self._keep(f"resid_post.{i}", hidden)
+            if i == self.score_layer and self.score_spec is not None:
+                s, e, w, b = self.score_spec
+                c0, c1 = self.chunk
+                lo, hi = max(s, c0), min(e, c1)
+                if lo < hi:
+                    h = hidden[0, lo - c0:hi - c0].float()
+                    self.scores.append((lo, (h @ w + b).detach().cpu()))
+            if i == self.stop_after:
+                raise StopForward
         return hook
 
 
@@ -128,10 +153,14 @@ def forward(lm, head, ids, positions, capture, chunk, device):
             end = min(n, start + step)
             capture.start(positions, start, end, store)
             x = torch.tensor([ids[start:end]], device=device)
-            out = lm(input_ids=x, past_key_values=cache, use_cache=cache is not None)
-            last = out.last_hidden_state[0, -1]
+            try:
+                out = lm(input_ids=x, past_key_values=cache, use_cache=cache is not None)
+            except StopForward:
+                out = None
+            if out is not None:
+                last = out.last_hidden_state[0, -1]
             del out, x
-        logprobs = torch.log_softmax(head(last).float(), -1)
+        logprobs = torch.log_softmax(head(last).float(), -1) if last is not None else None
     tensors = {name: torch.stack([rows[k] for k in range(len(positions))]) for name, rows in store.items()}
     return tensors, logprobs
 
@@ -157,6 +186,9 @@ def main() -> None:
     parser.add_argument("--check-chunking", action="store_true")
     parser.add_argument("--min-cosine", type=float, default=0.999)
     parser.add_argument("--deadline-s", type=float, default=0, help="0 = none")
+    parser.add_argument("--probes", default=None, help="npz with W [k, hidden], b [k]: jobs' score.probe picks a row")
+    parser.add_argument("--score-layer", type=int, default=None)
+    parser.add_argument("--stop-after-layer", type=int, default=None, help="skip later layers (whole passes only)")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", default="bfloat16")
     args = parser.parse_args()
@@ -209,6 +241,32 @@ def main() -> None:
 
     chunk = args.chunk
     chunk_checked = None
+    probes = None
+    if args.probes:
+        import numpy as np
+        npz = np.load(args.probes)
+        probes = (torch.tensor(npz["W"], dtype=torch.float32, device=args.device),
+                  torch.tensor(npz["b"], dtype=torch.float32, device=args.device))
+        run_log["probes"] = {"path": args.probes, "n": int(npz["W"].shape[0]), "layer": args.score_layer}
+
+    def job_capture(job, chunk_now):
+        # stopping early leaves later layers' cache empty, so only for whole passes
+        cap = Capture(layers, chosen, want_embed, score_layer=args.score_layer,
+                      stop_after=args.stop_after_layer if chunk_now <= 0 else None)
+        spec = job.get("score")
+        if spec and probes is not None:
+            k = spec["probe"]
+            cap.set_score((spec["start"], spec["end"], probes[0][k], probes[1][k]))
+        return cap
+
+    def collect_scores(cap, job):
+        spec = job.get("score")
+        if not spec or probes is None:
+            return None
+        buf = torch.full((spec["end"] - spec["start"],), float("nan"))
+        for lo, v in cap.scores:
+            buf[lo - spec["start"]:lo - spec["start"] + len(v)] = v
+        return buf
 
     def check_chunking():
         small = min(jobs, key=lambda j: len(j["token_ids"]))
@@ -249,8 +307,9 @@ def main() -> None:
         t0 = time.time()
         oom = False
         try:
-            with Capture(layers, chosen, want_embed) as cap:
+            with job_capture(job, chunk) as cap:
                 tensors, logprobs = forward(lm, head, ids, pos, cap, chunk, args.device)
+                scores = collect_scores(cap, job)
         except torch.OutOfMemoryError:
             if chunk > 0:
                 raise
@@ -271,19 +330,23 @@ def main() -> None:
             if cuda:
                 torch.cuda.reset_peak_memory_stats()
             t0 = time.time()
-            with Capture(layers, chosen, want_embed) as cap:
+            with job_capture(job, chunk) as cap:
                 tensors, logprobs = forward(lm, head, ids, pos, cap, chunk, args.device)
+                scores = collect_scores(cap, job)
         forward_s = time.time() - t0
         rate = len(ids) / forward_s if rate is None else 0.7 * rate + 0.3 * len(ids) / forward_s
-        top = torch.topk(logprobs, 10)
+        top = torch.topk(logprobs, 10) if logprobs is not None else None
         name = safe_name(job["id"])
+        if scores is not None:
+            tensors["probe_logits"] = scores.contiguous()
         save_file({k: v.contiguous() for k, v in tensors.items()}, str(out / f"{name}.safetensors"))
         meta = {
             "id": job["id"], "rows": pos, "positions": job["positions"], "n_tokens": len(ids),
             "sha256_token_ids": job["sha256_token_ids"], "model_revision": job.get("model_revision"),
-            "layers": chosen, "tensors": sorted(tensors), "hidden_size": int(next(iter(tensors.values())).shape[-1]),
+            "layers": chosen, "tensors": sorted(tensors), "hidden_size": int(next(v for k, v in tensors.items() if k != "probe_logits").shape[-1]),
             "dtype": str(next(iter(tensors.values())).dtype).replace("torch.", ""),
-            "chunk": chunk, "last_token_top10": [[int(i), round(float(v), 4)] for v, i in zip(top.values, top.indices)],
+            "chunk": chunk, "score": job.get("score"), "stopped_after_layer": args.stop_after_layer if chunk <= 0 else None,
+            "last_token_top10": None if top is None else [[int(i), round(float(v), 4)] for v, i in zip(top.values, top.indices)],
             "forward_s": round(forward_s, 2),
             "peak_gpu_gib": round(torch.cuda.max_memory_allocated() / 2**30, 1) if cuda else None,
             "environment": environment,
