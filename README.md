@@ -26,7 +26,7 @@ Qwen3.6-27B served with vLLM on Modal.
     └── requirements.txt     # analysis venv (tools/.venv), torch-free
 ```
 
-## Progress (2026-10-23)
+## Progress (2026-10-23, after the overnight run)
 
 | Step | Status |
 | --- | --- |
@@ -36,9 +36,9 @@ Qwen3.6-27B served with vLLM on Modal.
 | 4. Logging | `run.json` written after every episode; per-call wire log added |
 | 5. Prompt rendering | on the paper's data: 1,000/1,000 rebuilt verdict prompts match logged `input_tokens`; earlier thinking is dropped by the template; history is a strict prefix, prompt + own reply is not |
 | 6. Boot, teacher forcing, timing | 5 paper verdict replies score −0.256/token vs −0.223 for our own samples (no token below −10); 2 episodes in 6.0 + 5.3 min, 0 failures, no pruning; ~$0.40 per early episode |
-| 7. Parallel pilot | not run yet |
+| 7. Overnight: 2 × 10-episode trajectories in parallel | sequence 2 complete (37 min, mutual ACCEPT from episode 4); sequence 1 crashed in episode 1 on a 64k-token degenerate reply (1,882 repeated tool calls). See `reports/2026-10-23-overnight.md` |
 
-GPU spend to date: about 60 H100-minutes (~$4.00), including one failed 31-minute start.
+GPU spend to date: about 105 H100-minutes (~$7.00), including one failed 31-minute start.
 Run outputs (`agent-collusion/results/`) are git-ignored.
 
 ## Source
