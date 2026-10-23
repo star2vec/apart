@@ -1,5 +1,7 @@
 # Overnight run, 2026-10-23
 
+Step numbers in this report are the setup steps, now S1–S7 in the README; "experiment 1" below is the verdict resampling script, used in step 4 of the experiments.
+
 Step 7 as asked: two full 10-episode trajectories in parallel (sequences 1 and 2), call
 logging on, 150-minute hard timeout each, server left to scale to zero. No other GPU job
 was started. Outputs: `agent-collusion/results/overnight/seq00{1,2}/` (git-ignored).

@@ -1,7 +1,7 @@
-"""Cache job, stage 1: rebuild communication-phase request bodies for the paper's runs.
+"""Step 1 (activation cache), part 1: rebuild communication-phase request bodies for the paper's runs.
 
 Run with the agent-collusion venv (LiteLLM 1.94.1, the repo's tool code):
-    agent-collusion/.venv/bin/python tools/cache/rebuild_comm_wire.py <traces_dir> <out.jsonl>
+    agent-collusion/.venv/bin/python tools/step1_cache/rebuild_comm_wire.py <traces_dir> <out.jsonl>
 
 Per run and agent, two bodies, both with the communication-phase tool list:
   kind=pass   history of the last episode up to (not including) its verdict-phase prompt:

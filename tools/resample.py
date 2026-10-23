@@ -1,4 +1,4 @@
-"""Experiment 1: resample verdict decisions from fixed histories.
+"""Resample verdict decisions from fixed histories (the verdict resampling of step 4).
 
 Each source decision point is one recorded verdict request: the agent's full history up
 to the verdict prompt, the submit_verdict tool, the forced tool_choice and the paper's
@@ -245,12 +245,12 @@ def main() -> None:
     parser.add_argument("--out", required=True)
     parser.add_argument("--go", action="store_true", help="send requests (starts the GPU)")
     parser.add_argument("--max-cost-usd", type=float, default=None, help="refuse if the no-reuse estimate exceeds this")
-    # cost model: decode and prefill measured in step 6; batch efficiency is a guess
+    # cost model: decode and prefill measured in setup S6; batch efficiency is a guess
     parser.add_argument("--expected-output-tokens", type=int, default=425, help="paper verdict mean")
     parser.add_argument("--decode-tps-per-stream", type=float, default=47.0)
     parser.add_argument("--batch-efficiency", type=float, default=0.5)
     parser.add_argument("--prefill-tps", type=float, default=14000.0,
-                        help="uncached prefill, measured in step 6 (cached prefixes run ~185k tok/s)")
+                        help="uncached prefill, measured in setup S6 (cached prefixes run ~185k tok/s)")
     parser.add_argument("--cold-start-s", type=float, default=160.0)
     parser.add_argument("--idle-s", type=float, default=300.0)
     args = parser.parse_args()

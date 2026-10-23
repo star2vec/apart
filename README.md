@@ -20,26 +20,41 @@ Qwen3.6-27B served with vLLM on Modal.
     ├── teacher_force.py     # paper replies' log-probs under our server vs our samples
     ├── log_prefix_check.py  # per-agent prefix check on a run's llm_calls.jsonl
     ├── replay_prepare.py    # rebuild a prompt, pick token positions for replay
-    ├── resample.py          # experiment 1: resample verdicts from fixed histories (plan unless --go)
-    ├── step6.sh             # step 6 in one GPU start
-    ├── cache/               # activation cache job: rebuild comm prompts, positions, index
+    ├── resample.py          # resample verdicts from fixed histories, for step 4 (plan unless --go)
+    ├── setup_s6.sh          # setup S6 in one GPU start
+    ├── step1_cache/         # step 1: rebuild comm prompts, positions, index; check and pack the download
     ├── paper_prompts/       # rebuild and render the paper's verdict calls
     └── requirements.txt     # analysis venv (tools/.venv), torch-free
 ```
 
-## Progress (2026-10-23, after the overnight run)
+## Setup (2026-10-23)
+
+Setup steps S1–S7 (serving, logging, rendering, timing). Steps 1–6 below are the experiments.
+
+| Setup | Status |
+| --- | --- |
+| S1. Modal vLLM server | done; boots at 262,144 context in ~2.5 min, KV cache 310,575 tokens |
+| S2. Environment, `.env` | done |
+| S3. LiteLLM smoke test (tools, `tool_choice=required`) | passed: tool call returned, `reasoning_content` populated |
+| S4. Logging | `run.json` written after every episode; per-call wire log added |
+| S5. Prompt rendering | on the paper's data: 1,000/1,000 rebuilt verdict prompts match logged `input_tokens`; earlier thinking is dropped by the template; history is a strict prefix, prompt + own reply is not |
+| S6. Boot, teacher forcing, timing | 5 paper verdict replies score −0.256/token vs −0.223 for our own samples (no token below −10); 2 episodes in 6.0 + 5.3 min, 0 failures, no pruning; ~$0.40 per early episode |
+| S7. Overnight: 2 × 10-episode trajectories in parallel | sequence 2 complete (37 min, mutual ACCEPT from episode 4); sequence 1 crashed in episode 1 on a 64k-token degenerate reply (1,882 repeated tool calls). See `reports/2026-10-23-overnight.md` |
+
+## Experiments: steps 1–6
+
+On the paper's 50 Qwen 3.6 main trajectories and their judge labels.
 
 | Step | Status |
 | --- | --- |
-| 1. Modal vLLM server | done; boots at 262,144 context in ~2.5 min, KV cache 310,575 tokens |
-| 2. Environment, `.env` | done |
-| 3. LiteLLM smoke test (tools, `tool_choice=required`) | passed: tool call returned, `reasoning_content` populated |
-| 4. Logging | `run.json` written after every episode; per-call wire log added |
-| 5. Prompt rendering | on the paper's data: 1,000/1,000 rebuilt verdict prompts match logged `input_tokens`; earlier thinking is dropped by the template; history is a strict prefix, prompt + own reply is not |
-| 6. Boot, teacher forcing, timing | 5 paper verdict replies score −0.256/token vs −0.223 for our own samples (no token below −10); 2 episodes in 6.0 + 5.3 min, 0 failures, no pruning; ~$0.40 per early episode |
-| 7. Overnight: 2 × 10-episode trajectories in parallel | sequence 2 complete (37 min, mutual ACCEPT from episode 4); sequence 1 crashed in episode 1 on a 64k-token degenerate reply (1,882 repeated tool calls). See `reports/2026-10-23-overnight.md` |
+| 1. Activation cache | done 2026-10-23: 200 passes (per run and agent: the last episode's communication-phase history and its last verdict prompt, each with its own phase's tool list), 14.26M tokens, whole passes (longest 93,645 tokens, peak 69.0 GiB); residual stream after layers 3, 7, …, 63 at 32,834 positions (A, A_call, every message end, C, verdict, feedback, reflection start/end, runner notices), 5.0 GiB bf16; index in `index.jsonl`. 39.6 H100-minutes, ~$2.61. Modal Volume `qwen36-activations:/cache-v1` |
+| 2. Probe at A | in progress |
+| 3. Message-by-message probe, probe at C | |
+| 4. Resampling session (vLLM) | |
+| 5. Agreement lines removed | |
+| 6. Projections session (transformers) | |
 
-GPU spend to date: about 105 H100-minutes (~$7.00), including one failed 31-minute start.
+GPU spend to date: about 145 H100-minutes (~$9.60), including one failed 31-minute start.
 Run outputs (`agent-collusion/results/`) are git-ignored.
 
 ## Source

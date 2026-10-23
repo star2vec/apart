@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Step 6 in one GPU start: boot at 262k, teacher-forcing check, 2-episode timing run,
+# Setup S6 in one GPU start: boot at 262k, teacher-forcing check, 2-episode timing run,
 # prefix check on the run's call log. Starts the Modal GPU container; run only when approved.
-#   tools/step6.sh <paper_wire_verdict.jsonl>
+#   tools/setup_s6.sh <paper_wire_verdict.jsonl>
 set -euo pipefail
 cd "$(dirname "$0")/.."
 WIRE="$1"
 FROM="${2:-1}"  # first stage to run (1-4), to resume after a failure
-OUT=agent-collusion/results/step6
+OUT=agent-collusion/results/setup_s6
 mkdir -p "$OUT"
 stamp() { date '+%F %T %z'; }
 
@@ -22,9 +22,9 @@ echo "[$(stamp)] 2/4 teacher forcing"
 
 echo "[$(stamp)] 3/4 timing run: sequence 1, 2 episodes, 45 min hard timeout"
 agent-collusion/.venv/bin/python tools/run_trajectory.py --sequence 1 --episodes 2 \
-  --output-dir results/step6/timing --timeout-min 45
+  --output-dir results/setup_s6/timing --timeout-min 45
 
 echo "[$(stamp)] 4/4 prefix check"
-RUN_DIR=$(ls -td agent-collusion/results/step6/timing/run_* | head -1)
+RUN_DIR=$(ls -td agent-collusion/results/setup_s6/timing/run_* | head -1)
 tools/.venv/bin/python tools/log_prefix_check.py "$RUN_DIR"
 echo "[$(stamp)] done; server idles 5 min, then scales down"

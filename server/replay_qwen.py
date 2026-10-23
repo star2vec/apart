@@ -1,8 +1,8 @@
 """Replay rebuilt prompts through Qwen3.6-27B with transformers and save residual-stream
 vectors. A second Modal GPU function next to the vLLM server; same weights Volume.
 
-    modal run server/replay_qwen.py --jobs <jobs.jsonl> --tag cache --layers 3,7,...      # plan only
-    modal run server/replay_qwen.py --jobs <jobs.jsonl> --tag cache --layers 3,7,... \\
+    modal run server/replay_qwen.py --jobs <jobs.jsonl> --tag step1-cache --layers 3,7,...      # plan only
+    modal run server/replay_qwen.py --jobs <jobs.jsonl> --tag step1-cache --layers 3,7,... \\
         --timeout-min 90 --go                                                            # starts a GPU
 
 --go uploads the jobs to the Volume qwen36-activations under /<tag>/inputs/, runs the worker

@@ -1,9 +1,9 @@
-"""Cache job, stage 2: render the two passes per run and agent, pick positions, write the index.
+"""Step 1 (activation cache), part 2: render the two passes per run and agent, pick positions, write the index.
 
-    tools/.venv/bin/python tools/cache/prepare.py --out agent-collusion/results/cache
+    tools/.venv/bin/python tools/step1_cache/prepare.py --out agent-collusion/results/step1_cache
 
 Inputs (defaults under agent-collusion/results/): paper traces, paper_wire_verdict.jsonl
-(verdict pass = the last episode's verdict prompt), cache/comm_wire.jsonl (stage 1), and
+(verdict pass = the last episode's verdict prompt), step1_cache/comm_wire.jsonl (part 1), and
 the paper's label tables (paper/labels/*.parquet).
 
 Passes per run and agent, each rendered with its own phase's tool list:
@@ -184,9 +184,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--traces", default=RESULTS / "paper" / "traces_qwen36_main", type=Path)
     parser.add_argument("--verdict-wire", default=RESULTS / "paper" / "paper_wire_verdict.jsonl", type=Path)
-    parser.add_argument("--comm-wire", default=RESULTS / "cache" / "comm_wire.jsonl", type=Path)
+    parser.add_argument("--comm-wire", default=RESULTS / "step1_cache" / "comm_wire.jsonl", type=Path)
     parser.add_argument("--labels", default=RESULTS / "paper" / "labels", type=Path)
-    parser.add_argument("--out", default=RESULTS / "cache", type=Path)
+    parser.add_argument("--out", default=RESULTS / "step1_cache", type=Path)
     args = parser.parse_args()
 
     tok = AutoTokenizer.from_pretrained(pins.MODEL_ID, revision=pins.MODEL_REVISION)
