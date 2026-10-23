@@ -7,6 +7,7 @@ history handling without changing the stored conversation.
 
 import json
 import os
+import threading
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -480,8 +481,14 @@ class _CallLog(CustomLogger):
         super().__init__()
         self.path = path
         self.sequence = 0
+        # Concurrent callers (e.g. resampling threads) must not interleave long lines.
+        self.lock = threading.Lock()
 
     def _write(self, event: str, kwargs: dict[str, Any], **fields: Any) -> None:
+        with self.lock:
+            self._write_locked(event, kwargs, **fields)
+
+    def _write_locked(self, event: str, kwargs: dict[str, Any], **fields: Any) -> None:
         self.sequence += 1
         record = {
             "seq": self.sequence,

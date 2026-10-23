@@ -20,6 +20,7 @@ Qwen3.6-27B served with vLLM on Modal.
     ├── teacher_force.py     # paper replies' log-probs under our server vs our samples
     ├── log_prefix_check.py  # per-agent prefix check on a run's llm_calls.jsonl
     ├── replay_prepare.py    # rebuild a prompt, pick token positions for replay
+    ├── resample.py          # experiment 1: resample verdicts from fixed histories (plan unless --go)
     ├── step6.sh             # step 6 in one GPU start
     ├── paper_prompts/       # rebuild and render the paper's verdict calls
     └── requirements.txt     # analysis venv (tools/.venv), torch-free
@@ -58,7 +59,8 @@ for this project is listed below.
    `reasoning_content`, tools, `tool_choice`, sampling), then a `response` record with the
    raw server response before LiteLLM's conversion (including vLLM's `reasoning` field),
    or an `error` record. Records are fsync'd as each call happens, so they survive a run
-   that dies mid-episode. No credentials or headers are written.
+   that dies mid-episode. No credentials or headers are written. Writes are serialised
+   with a lock so concurrent callers (`tools/resample.py`) cannot interleave lines.
 
 ## Model and serving
 
