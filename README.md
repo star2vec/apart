@@ -22,6 +22,7 @@ Qwen3.6-27B served with vLLM on Modal.
     ├── replay_prepare.py    # rebuild a prompt, pick token positions for replay
     ├── resample.py          # experiment 1: resample verdicts from fixed histories (plan unless --go)
     ├── step6.sh             # step 6 in one GPU start
+    ├── cache/               # activation cache job: rebuild comm prompts, positions, index
     ├── paper_prompts/       # rebuild and render the paper's verdict calls
     └── requirements.txt     # analysis venv (tools/.venv), torch-free
 ```
