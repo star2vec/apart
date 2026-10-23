@@ -75,12 +75,15 @@ def main() -> None:
     parser.add_argument("--nulls-a-call", type=int, default=20)
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--jobs", type=int, default=8)
+    parser.add_argument("--rows", choices=["all", "prev_reject"], default="all")
+    parser.add_argument("--results-name", default="followups.json")
     args = parser.parse_args()
     layers = pl.LAYERS
     index, episodes = pl.load_index(), pl.load_episodes()
     results, real_by_pos, splits = {}, {}, None
     for pos, n_null in (("A", 0), ("A_call", args.nulls_a_call)):
-        us = sorted((u for u in rs.units(index, episodes, pos_type=pos) if u["type"] in ("onset", "before_onset")),
+        us = sorted((u for u in rs.units(index, episodes, pos_type=pos) if u["type"] in ("onset", "before_onset")
+                     and (args.rows == "all" or (u["prev"] is not None and not u["prev"]["own_accept"]))),
                     key=lambda u: (u["run"], u["agent"], u["episode"]))
         keys = [(u["run"], u["agent"], u["episode"]) for u in us]
         if splits is None:
@@ -107,10 +110,10 @@ def main() -> None:
         print(pos, json.dumps(rep["added_value"]), flush=True)
         results[pos] = rep
         real_by_pos[pos] = sel
-        (OUT / "followups.json").write_text(json.dumps(results, indent=1))
+        (OUT / args.results_name).write_text(json.dumps(results, indent=1))
     d = np.array([a["test_auc"] - b["test_auc"] for a, b in zip(real_by_pos["A_call"], real_by_pos["A"])])
     results["A_call_minus_A_selected"] = {**fold_stats(d), "folds_better": int((d > 0).sum()), "n_folds": len(d)}
-    (OUT / "followups.json").write_text(json.dumps(results, indent=1))
+    (OUT / args.results_name).write_text(json.dumps(results, indent=1))
     print(json.dumps(results["A_call_minus_A_selected"]))
 
 

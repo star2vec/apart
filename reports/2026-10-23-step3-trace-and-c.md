@@ -149,6 +149,82 @@ position's own probe. The A→C transfer is unstable across folds and layers (0.
 Whatever predicts the verdict at A is not the same readout as at C. The C probe picks up
 something more, which is also what lifts it above the feedback baseline.
 
+## Last message vs C: same conversation, only C has the verdict prompt
+
+**What each position has seen.** The last message slot (s10, R5 Bob) and C have seen the same
+conversation. Between them come only:
+- for Bob, the result turn of his own final send (`{"success": true, ...}`);
+- for both agents, the verdict-phase user message ("## Episode k: verdict phase / Judge whether
+  … completed their task correctly … submit_verdict"), then `<|im_start|>assistant\n`.
+
+C also comes from the verdict pass, whose tool list at the top is `submit_verdict` instead of
+`send_message`. Step 1 showed that this changes the vectors very little (median cosine 0.9997).
+So any difference between s10 and C is the verdict prompt.
+
+**Method.** Each position's own probe, as in the table above (layer and L2 strength chosen in
+training folds), on the 340 rows that have both positions. Scores are out-of-fold ranks;
+intervals come from a trajectory bootstrap. Code: `tools/step3/c_vs_last.py`, which trains only
+these two positions and reproduces the s10 and C fold AUCs above.
+
+| | Last message (s10) | C | C − s10 [95% CI] |
+|---|---|---|---|
+| All rows (fold AUC) | 0.895 ± 0.026 | 0.952 ± 0.018 | +0.057, better in 25/25 folds |
+| All rows (pooled) | 0.908 | 0.956 | **+0.048 [+0.027, +0.069]** |
+| Agreement-onset trajectories | 0.929 | 0.978 | +0.049 [+0.024, +0.073] |
+| No-agreement-onset trajectories | 0.900 | 0.941 | +0.041 [+0.012, +0.069] |
+| Alice (s10 = Bob's final message) | 0.862 | 0.943 | **+0.081 [+0.045, +0.115]** |
+| Bob (s10 = his own final message) | 0.951 | 0.969 | +0.017 [−0.004, +0.038] |
+
+Read with one readout at both positions (the C probe, chosen layer), the gap is far larger:
+0.956 at C against 0.700 at s10. The C probe does not read the message-end token at all (see the
+C-probe trace below).
+
+**Reading.**
+- The verdict prompt adds about +0.05 AUC over the same conversation, on both paths. That is
+  what lifts C above the feedback baseline, while s10 sits level with it.
+- The gain belongs to the agent who did **not** write the last message. Alice's last position is
+  Bob's message, and the verdict prompt adds +0.081 for her. Bob's last position is his own final
+  message, which he wrote after thinking (that thinking is later dropped from the context). At
+  the end of it his verdict is already about as readable as at C (0.951 vs 0.969, interval
+  includes 0).
+- So, for the agent who has just spoken, the verdict is visible in the last message it wrote.
+  For the agent who has just read, the verdict appears only once the question is asked.
+
+## The C probe traced through the episode (one readout everywhere)
+
+Code: `tools/step3/trace_c_probe.py`; numbers in `trace_c_probe.json`; per-row scores in
+`trace_c_scores.jsonl`.
+- In each trajectory-grouped fold (the same 25 as above), a probe is trained at layer 47 on the
+  training trajectories' C vectors, with the L2 strength chosen in inner folds.
+- It is applied unchanged to the test trajectories' vectors at A, A_call, every message slot and
+  C, and to their sustained rows. Unlike the per-position probes, one readout produces the whole
+  curve.
+
+![C probe curves](figures/step3/step3_c_probe_curves.png)
+
+| Position | A | A_call | R1 Alice … R5 Bob (s1–s10) | C |
+|---|---|---|---|---|
+| C-probe AUC (fold mean) | 0.726 | 0.767 | 0.53–0.66 | **0.956** |
+| vs feedback (pooled ranks) | −0.180 | −0.134 | −0.24 to −0.37 | **+0.053 [+0.033, +0.073]** |
+| Median score: before onset | 0.66 | 0.50 | 0.26–0.43 | 0.06 |
+| Median score: agreement onsets | 0.76 | 0.69 | 0.35–0.45 | 0.98 |
+| Median score: no-agreement onsets | 0.78 | 0.68 | 0.28–0.45 | 0.92 |
+| Median score: sustained (ceiling) | 0.64 | 0.63 | 0.25–0.45 | 0.86 |
+
+- **Jumps.** On every one of the 36 agreement-onset curves, the largest rise is at C, after the
+  agreement message. On the no-agreement onsets, the largest rise is at C on 53 of 64 curves.
+- **Medians.** Agreement onsets: 0.76 at A, 0.37 at the agreement message, 0.98 at C.
+  No-agreement onsets: 0.78 at A, 0.31 at R5 Bob, 0.92 at C.
+- **Before C.** From R3 on, agreement onsets sit slightly above the other groups (medians
+  0.37–0.43 against 0.26–0.38), but the readout barely separates rows there.
+
+**Caveat on what this readout can see.** The C probe was trained on one token type, the `\n`
+after `<|im_start|>assistant`. Message slots end on `<|im_end|>` tokens. The one other position
+of C's token type, A_call, gives its best score outside C (0.767). Part of the low AUC at message
+slots is therefore a change of token, not only a change of state. The verdict-pass copies of the
+same positions (verdict tool list) score almost the same: AUC within +0.004 to +0.025 of the
+comm-pass copies, median score shift −0.002 to −0.028. So the tool list is not the reason.
+
 ## 4. Speaking order at A_call
 
 Alice always speaks first, so she has no peer message in view at A_call. Bob always speaks
@@ -162,6 +238,54 @@ second, so Alice's round-1 message is in view. Bootstrap over trajectories on ou
 A_call's small edge over A (step 2: +0.010) sits with the agent who speaks first, who has seen
 no peer message yet. So it does not come from the peer's opening message. In neither group does
 A_call or A beat the feedback baseline.
+
+
+## Restricted to agents whose previous verdict was REJECT
+
+Same pipeline (`run_step3.py --rows prev_reject`) on the 210 rows where the agent's own previous
+verdict was reject: 104 switch to accept, 106 stay at reject. By path:
+- agreement-onset trajectories: 26 onset and 46 before-onset rows;
+- no-agreement-onset trajectories: 45 onset and 93 before-onset rows.
+
+Numbers: `agent-collusion/results/step3_prev_reject/results.json`. Figures:
+`reports/figures/step3_prev_reject/`. The feedback baseline here is 0.784 ± 0.043 (fold mean).
+
+| Position | Probe (pooled) | Feedback | Difference [95% CI] | Agreement path, probe/feedback | No-agreement path, probe/feedback |
+|---|---|---|---|---|---|
+| A | 0.793 | 0.802 | −0.009 [−0.059, +0.042] | 0.805 / 0.851 | 0.797 / 0.776 |
+| A_call | 0.821 | 0.802 | +0.019 [−0.035, +0.076] | 0.791 / 0.851 | 0.842 / 0.776 (+0.067 [−0.009, +0.140]) |
+| R1 Alice | 0.791 | 0.802 | −0.011 | **0.768 / 0.851, worse** | 0.809 / 0.776 |
+| R1 Bob | 0.765 | 0.799 | −0.034 | **worse** | 0.771 / 0.774 |
+| R2 Alice | 0.790 | 0.802 | −0.012 | **worse** | 0.818 / 0.782 |
+| R2 Bob | 0.731 | 0.804 | **−0.074 [−0.138, −0.011]** | **worse** | 0.769 / 0.776 |
+| R3 Alice | 0.744 | 0.799 | **−0.055 [−0.110, −0.002]** | **worse** | 0.753 / 0.772 |
+| R3 Bob | 0.769 | 0.802 | −0.033 | 0.823 / 0.866 | 0.744 / 0.767 |
+| R4 Alice | 0.796 | 0.799 | −0.003 | 0.774 / 0.845 | 0.807 / 0.775 |
+| R4 Bob | 0.757 | 0.801 | −0.044 | 0.826 / 0.854 | 0.720 / 0.773 |
+| R5 Alice | 0.780 | 0.805 | −0.025 | 0.856 / 0.850 | 0.744 / 0.781 |
+| R5 Bob | 0.788 | 0.804 | −0.016 | 0.861 / 0.855 | 0.752 / 0.776 |
+| **C** | **0.912** | 0.802 | **+0.110 [+0.067, +0.154]** | **0.949 / 0.851** | **0.888 / 0.776** |
+
+"Worse" means the interval lies below 0. For the agreement path through round 3 Alice, the
+differences run from −0.08 to −0.18.
+
+- **First position that beats the feedback baseline: C, overall and on both paths.** No message
+  slot does. In agreement-onset trajectories, message slots up to round 3 are significantly below
+  the baseline; from round 5 they reach it. In no-agreement trajectories, A_call and R1–R2 Alice
+  lean above the baseline, but no interval excludes 0.
+- **C probe:** 0.901 ± 0.040, against a null of 0.490 and a majority-class rate of 0.477. Layer
+  47 is chosen in 16 of 25 folds.
+- **Transfer:** A→C 0.547 and C→A 0.561, near chance. Among switchers, the A and C readouts do
+  not share a direction.
+- **Last message vs C:** 0.758 vs 0.899 (fold means), +0.142, better in 25/25 folds; pooled
+  +0.123 [+0.072, +0.178]. For Alice +0.179 [+0.100, +0.261]; for Bob +0.069 [+0.021, +0.128].
+  The verdict prompt matters even more for switchers than for the full set.
+- **Speaking order at A_call:** the first speaker (Alice) shows A_call 0.829 vs feedback 0.784
+  (+0.045 [−0.043, +0.127]) and A_call − A +0.049 [−0.013, +0.110]. The second speaker (Bob)
+  shows −0.009 and +0.004.
+- **Agreement onsets (26 switching rows):** the largest rise of the per-position curves is earlier
+  than the agreement message in 21 rows, at it in 2 and later in 3. The per-position-probe
+  caveat applies.
 
 ## Reading
 
@@ -177,3 +301,13 @@ A_call or A beat the feedback baseline.
 3. **Grey area.** Between the agreement message and C, the probe does not beat the baseline,
    and AUC hovers around it on both paths. The jump past the baseline happens at C, once the
    verdict is asked for and before any thinking. That is where the extra information appears.
+   Compared with the last message, which has seen the same conversation, the verdict prompt adds
+   +0.05 AUC (+0.12 for agents switching from reject). The gain is concentrated in the agent who
+   read the last message rather than wrote it.
+4. **One readout everywhere (the C probe).** Its score stays low and flat through the exchange
+   for every group and jumps only at C. On all 36 agreement-onset curves the largest rise is at
+   C, not at the agreement message. With the token-type caveat, the state the C probe reads is
+   set up by the verdict prompt.
+5. **Switchers (previous verdict reject).** The same picture holds and is sharper. No message slot
+   beats the previous outcome; in agreement trajectories, early slots are below it. C beats it by
+   +0.110. A and C readouts do not transfer.

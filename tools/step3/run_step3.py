@@ -239,6 +239,34 @@ def jump(curve, agree_idx):
             "largest_rise": round(float(steps[rise - 1]), 4)}
 
 
+def compare_c_last(probe, y, runs, sel, own_oof, masks, n_split, n_boot, last="s10"):
+    """Last message position vs C: C sees the same conversation plus the verdict prompt
+    (and, for the agent who sent the last message, the send tool's result turn)."""
+    both = ~np.isnan(own_oof[last]) & ~np.isnan(own_oof["C"])
+
+    def restricted(pieces):
+        return [(ids[both[ids]], p[both[ids]]) for ids, p in pieces]
+
+    r_c = rank_oof(len(probe), restricted([s["pred"]["C"] for s in sel["C"]]))
+    r_last = rank_oof(len(probe), restricted([s["pred"][last] for s in sel[last]]))
+    r_c_at_last = rank_oof(len(probe), restricted([s["pred"][last] for s in sel["C"] if last in s["pred"]]))
+    fold_c = np.array(fold_aucs(y, restricted([s["pred"]["C"] for s in sel["C"]])))
+    fold_last = np.array(fold_aucs(y, restricted([s["pred"][last] for s in sel[last]])))
+    speakers = {"alice (s10 = Bob's message)": np.array([r["agent"] == "alice" for r in probe]),
+                "bob (s10 = his own message)": np.array([r["agent"] == "bob" for r in probe])}
+    return {
+        "last_position": last, "n_rows_with_both": int(both.sum()),
+        "note": "boot_diff fields: auc_probe = C, auc_feedback = the other score",
+        "own_probes_C_minus_last": {k: boot_diff(y, r_c, r_last, runs, m & both, n_boot)
+                                    for k, m in {**masks, **speakers}.items()},
+        "fold_auc_C": stats(fold_c), "fold_auc_last": stats(fold_last),
+        "paired_folds_C_minus_last": {"mean_diff": round(float(np.nanmean(fold_c - fold_last)), 4),
+                                      "folds_better": int((fold_c - fold_last > 0).sum()), "n_folds": n_split},
+        "C_probe_at_C_minus_at_last": {k: boot_diff(y, r_c, r_c_at_last, runs, m & both, n_boot)
+                                       for k, m in masks.items()},
+    }
+
+
 # --------------------------------------------------------------------------- plots
 
 def plots(probe, own_oof, a_oof, fb_oof, sust, sust_oof, summary):
@@ -351,6 +379,9 @@ def main() -> None:
     parser.add_argument("--boot", type=int, default=2000)
     parser.add_argument("--layers", default=None, help="comma-separated subset, for tests")
     parser.add_argument("--out", default=None, help="results dir (default results/step3)")
+    parser.add_argument("--fig", default=None, help="figures dir (default reports/figures/step3)")
+    parser.add_argument("--rows", choices=["all", "prev_reject"], default="all",
+                        help="prev_reject: probe rows only where the agent's previous verdict was reject")
     args = parser.parse_args()
     global OUT, FIG
     if args.layers:
@@ -358,11 +389,15 @@ def main() -> None:
     if args.out:
         OUT = Path(args.out)
         FIG = OUT / "figures"
+    if args.fig:
+        FIG = Path(args.fig)
     OUT.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     index, episodes = pl.load_index(), pl.load_episodes()
     rows = build_rows(index, episodes)
     probe = [r for r in rows if r["type"] in ("onset", "before_onset")]
+    if args.rows == "prev_reject":
+        probe = [r for r in probe if r["unit"]["prev"] is not None and not r["unit"]["prev"]["own_accept"]]
     sust = [r for r in rows if r["type"] == "sustained"]
     y = np.array([r["y"] for r in probe])
     runs = [r["run"] for r in probe]
@@ -439,6 +474,8 @@ def main() -> None:
         return next((Q for Q in CURVE if summary["per_position"][Q][which][key]["beats"]), None)
 
     summary["first_beats_feedback"] = {k: first_beat(k) for k in masks}
+
+    summary["C_vs_last_message"] = compare_c_last(probe, y, runs, sel, own_oof, masks, n_split, args.boot)
     summary["first_beats_feedback_a_probe"] = {k: first_beat(k, "bootstrap_a_probe") for k in masks}
 
     # A <-> C transfer: selected (source's layer from its training folds) and per layer
@@ -451,7 +488,8 @@ def main() -> None:
     summary["transfer_A_C"] = transfer
 
     # C probe with a shuffled null (step 2 pipeline, same splits)
-    us_c = sorted((u for u in rs.units(index, episodes, "C", "verdict") if u["type"] in ("onset", "before_onset")),
+    us_c = sorted((u for u in rs.units(index, episodes, "C", "verdict") if u["type"] in ("onset", "before_onset")
+                   and (args.rows == "all" or (u["prev"] is not None and not u["prev"]["own_accept"]))),
                   key=lambda u: (u["run"], u["agent"], u["episode"]))
     assert [(u["run"], u["agent"], u["episode"]) for u in us_c] == [(r["run"], r["agent"], r["episode"]) for r in probe]
     rng = np.random.default_rng(0)

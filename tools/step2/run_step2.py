@@ -124,15 +124,19 @@ def main() -> None:
     parser.add_argument("--layers", default=",".join(map(str, pl.LAYERS)))
     parser.add_argument("--skip-control", action="store_true")
     parser.add_argument("--controls", default="all,probe_set", help="which controls to run")
-    parser.add_argument("--resume", action="store_true", help="keep results already in results.json")
+    parser.add_argument("--resume", action="store_true", help="keep results already in the results file")
+    parser.add_argument("--rows", choices=["all", "prev_reject"], default="all",
+                        help="prev_reject: only agents whose own verdict in the previous episode was reject")
+    parser.add_argument("--results-name", default="results.json")
     args = parser.parse_args()
     layers = [int(x) for x in args.layers.split(",")]
     OUT.mkdir(parents=True, exist_ok=True)
     index, episodes = pl.load_index(), pl.load_episodes()
     all_units = units(index, episodes)
-    old = json.loads((OUT / "results.json").read_text()) if args.resume and (OUT / "results.json").exists() else {}
+    old = json.loads((OUT / args.results_name).read_text()) if args.resume and (OUT / args.results_name).exists() else {}
     results = old | {"settings": {"position": "A", "pass": "communication", "repeats": args.repeats, "outer_folds": 5,
-                            "inner_folds": 4, "c_grid": pl.C_GRID.tolist(), "layers": layers, "nulls": args.nulls}}
+                            "inner_folds": 4, "c_grid": pl.C_GRID.tolist(), "layers": layers, "nulls": args.nulls,
+                            "rows": args.rows}}
 
     # Positive control: previous episode's reward.
     if not args.skip_control:
@@ -151,10 +155,12 @@ def main() -> None:
             rep["n_rows"] = len(us)
             rep["label_counts"] = {int(k): int(v) for k, v in zip(*np.unique(y, return_counts=True))}
             results[name] = rep
-            (OUT / "results.json").write_text(json.dumps(results, indent=1))
+            (OUT / args.results_name).write_text(json.dumps(results, indent=1))
 
     # Main probe: own verdict at A, onset + before-onset.
     us = [u for u in all_units if u["type"] in ("onset", "before_onset")]
+    if args.rows == "prev_reject":
+        us = [u for u in us if u["prev"] is not None and not u["prev"]["own_accept"]]
     y = np.array([u["y"] for u in us])
     splits = pl.make_splits([u["run"] for u in us], repeats=args.repeats)
     rng = np.random.default_rng(0)
@@ -177,7 +183,7 @@ def main() -> None:
     best_fixed = max(per_layer, key=lambda L: rep["per_layer"][L]["auc"]["mean"])
     rep["note_best_fixed_layer_by_test"] = {"layer": best_fixed, "warning": "chosen on test scores; descriptive only"}
     results["probe_A"] = rep
-    (OUT / "results.json").write_text(json.dumps(results, indent=1))
+    (OUT / args.results_name).write_text(json.dumps(results, indent=1))
     print(json.dumps({k: rep[k] for k in ("selected", "baselines", "selected_vs_baseline", "majority_acc")}, indent=1))
 
 

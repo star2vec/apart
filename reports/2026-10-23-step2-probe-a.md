@@ -168,3 +168,44 @@ speaking order would separate the two.
   A_call; better in 19/25 folds each).
 - That is weak evidence that something beyond the feedback history is already present before
   any message is sent. It is not evidence of a decision that is settled before the agreement.
+
+## Restricted to agents whose previous verdict was REJECT
+
+Added after steps 2–3: who switches to ACCEPT? Same pipeline, splits, baselines and null
+(100 permutations), on the 210 onset and before-onset rows where the agent's own verdict in the
+previous episode was reject (episode 1 excluded). 104 of them switch to accept (all 71 onset rows
+and 33 of 139 before-onset rows); 106 stay at reject. The rows cover all 50 trajectories. The
+majority-class accuracy is 0.477. Numbers: `results_prev_reject.json`, `followups_prev_reject.json`.
+
+| | AUC (mean ± SD over 25 folds) | min–max |
+|---|---|---|
+| **A probe, layer chosen in training folds** | **0.774 ± 0.064** | 0.628–0.876 |
+| Baseline: feedback features | **0.784 ± 0.043** | 0.699–0.854 |
+| Baseline: episode number | 0.734 ± 0.055 | 0.627–0.835 |
+| Baseline: previous relaxation flag | 0.666 ± 0.044 | 0.601–0.778 |
+| Shuffled-label null (selected layer) | 0.500 (95th pct 0.585) | |
+| A_call probe | 0.806 ± 0.044 (null 0.494, 95th pct 0.542) | 0.704–0.893 |
+
+Notes on the table:
+- **A probe vs baselines (paired):** −0.010 against feedback (better in 12/25 folds), +0.039
+  against episode (18/25), +0.107 against relaxation (22/25).
+- **Layers chosen:** 35 (9/25) and 39 (6/25) at A; 35 (16/25) and 39 (7/25) at A_call.
+- **By layer:** at A, from 0.721 (layer 3) to 0.798 (layer 35), with a fold SD of 0.04–0.07.
+  Every layer beats all 100 permutations.
+
+Added value on top of the feedback features (stacked as in the follow-ups above):
+
+| | A | A_call |
+|---|---|---|
+| Feedback alone (C=1) | 0.788 ± 0.039 | 0.788 ± 0.039 |
+| Probe + feedback | 0.805 ± 0.053 | **0.826 ± 0.032** |
+| Gain (paired) | +0.017 ± 0.043, better in 18/25 folds | **+0.038 ± 0.049, better in 20/25 folds** |
+
+The A_call probe beats the A probe by +0.033 ± 0.077 (17/25 folds).
+
+**What it shows.** The task is harder here (0.77–0.81 instead of 0.89), because the previous
+verdict no longer gives the answer away. The probe still does not clearly beat the previous
+episode's outcome on its own. On top of it, the probe adds more than in the full set:
++0.017 at A and +0.038 at A_call, against +0.007 and +0.013 before. The gain is largest at the
+agent's own first turn, so the activations carry some information about who is about to switch
+that the feedback history does not. It is still modest and varies a lot across folds.
