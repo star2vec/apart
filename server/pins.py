@@ -13,14 +13,17 @@ VLLM_IMAGE = (
 )
 HF_HUB_VERSION = "2.1.1"
 
-# 64,000 output tokens (paper setting) + up to 67,072 prompt tokens.
-# vLLM rejects prompt + max_tokens > max_model_len; the game treats that rejection
-# as a context-window error and drops the agent's oldest episode from memory.
-MAX_MODEL_LEN = 131_072
+# Native context: 64,000 output tokens (paper setting) + up to 198,144 prompt tokens.
+# vLLM rejects prompt + max_tokens > max_model_len (no clamping); the game treats that
+# rejection as a context-window error and drops the agent's oldest episode from memory.
+# The paper's Qwen3.6 trajectories reach 94,483-token prompts (11% of calls > 67,072),
+# so 131,072 would prune memory from about episode 6; 262,144 never does. The limit
+# reserves no memory: KV pages (271,936 tokens on an H100) are allocated per token used.
+MAX_MODEL_LEN = 262_144
 
-# Each running sequence holds one Mamba (linear-attention) state block; on an H100 with
-# this max_model_len only ~361 fit, below vLLM's default of 1024. 8 runner processes
-# need at most ~16 in flight, so 64 leaves headroom without starving the KV cache.
+# Each running sequence holds one Mamba (linear-attention) state block; on an H100
+# only ~361 fit, below vLLM's default of 1024. 8 runner processes need at most ~16
+# in flight, so 64 leaves headroom without starving the KV cache.
 MAX_NUM_SEQS = 64
 
 # "H100!" pins an 80 GB H100 and stops Modal's silent upgrade to H200,

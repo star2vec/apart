@@ -42,7 +42,7 @@ this project are listed below.
 | Server | vLLM 0.31.0 (`vllm/vllm-openai:v0.31.0` pinned by digest) on one Modal H100 80 GB |
 | Served name | `qwen3.6-27b` (LiteLLM route `openai/qwen3.6-27b`) |
 | Parsers | reasoning `qwen3`, tool calls `qwen3_coder` with auto tool choice |
-| `--max-model-len` | 131,072 (64,000 output + up to 67,072 prompt tokens) |
+| `--max-model-len` | 262,144, native (64,000 output + up to 198,144 prompt tokens; the paper's Qwen 3.6 prompts reach 94,483) |
 | `--max-num-seqs` | 64 (default 1024 exceeds the 361 Mamba state blocks that fit) |
 | Sampling | temperature 1.0, max output tokens 64,000 (paper); top_p 0.95, top_k 20 from the model's generation config |
 
