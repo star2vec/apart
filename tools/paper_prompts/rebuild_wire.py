@@ -76,6 +76,7 @@ with out_path.open("w") as out:
                 body = CAPTURED.pop()
                 out.write(json.dumps({"run": f.name, "ep": ep["episode_index"], "agent": agent,
                                       "logged_input_tokens": usage[0]["input_tokens"],
-                                      "history_len": len(history), "body": body}) + "\n")
+                                      "history_len": len(history), "body": body,
+                                      "reply": msgs[cuts[0] + 1] if cuts[0] + 1 < len(msgs) else None}) + "\n")
                 rows += 1
 print("wire bodies written:", rows)

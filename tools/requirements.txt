@@ -1,0 +1,6 @@
+# Analysis tools (prompt rendering, teacher forcing). Torch-free; tokenizer + template only.
+transformers==5.17.0
+jinja2==3.1.6
+openai==2.52.0
+python-dotenv==1.2.2
+pyarrow==21.0.0
