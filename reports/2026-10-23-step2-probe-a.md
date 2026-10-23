@@ -117,8 +117,54 @@ Every layer (descriptive, AUC on the test folds; not used for any choice):
 - The probe set mixes two things. Every onset row is accept, and onset follows certain feedback
   patterns, so the label is partly "is this the onset episode".
 
-## Not done (possible follow-ups, Mac only)
+## Follow-ups
 
-- Probe plus feedback features against feedback features alone (does A add anything on top?).
-- The same probe at `A_call` (the agent's own first turn, after the peer's opening message for
-  the agent that speaks second).
+Code: `tools/step2/followups.py`; numbers in `agent-collusion/results/step2/followups.json`. Rows
+are sorted by (run, agent, episode), so A and A_call share identical splits (5 × 5 trajectory-grouped
+folds, as above). The A probe reproduces the main run: 0.888 ± 0.023.
+
+### Does the probe add anything on top of the feedback features?
+
+Each outer split uses training data only:
+- the layer and the L2 strength come from the inner CV;
+- the training rows get out-of-fold probe logits over the inner splits;
+- a logistic regression (C=1) is fitted on [probe logit + the 7 standardised feedback features];
+- the same model on the feedback features alone (C=1) is the comparison.
+
+| | A | A_call |
+|---|---|---|
+| Probe alone (selected layer) | 0.888 ± 0.023 | 0.898 ± 0.028 |
+| Feedback features alone | 0.896 ± 0.019 | 0.896 ± 0.019 |
+| **Probe + feedback** | **0.903 ± 0.019** | **0.910 ± 0.019** |
+| Gain over feedback (paired) | +0.007 ± 0.016, better in 19/25 folds | +0.013 ± 0.015, better in 19/25 folds |
+| Probe weight in the combined model | positive in 25/25 folds (0.18–1.73) | positive in 25/25 folds (0.19–1.76) |
+
+So the residual stream does carry some verdict information that the previous episode's outcome
+does not, but not much: about +0.01 AUC on top of 0.896.
+
+### Probe at A_call (the opening of the agent's own first communication turn)
+
+- **Selected-layer AUC:** 0.898 ± 0.028 (range 0.833–0.956).
+- **Layers chosen:** 39 (12/25), 35 (10/25).
+- **Null:** 20 permutations, mean 0.498, 95th percentile 0.548. The probe beats all 20, so
+  p = 0.048, the smallest possible with 20.
+- **Majority-class accuracy:** 0.604.
+- **Paired against A on the same folds:** +0.010 ± 0.023, better in 19 of 25 folds.
+
+The agent that speaks second sees the peer's first message before A_call, so some of this
+difference may come from the peer's opening rather than the agent's own state. Splitting by
+speaking order would separate the two.
+
+| Layer | 3 | 7 | 11 | 15 | 19 | 23 | 27 | 31 | 35 | 39 | 43 | 47 | 51 | 55 | 59 | 63 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| A_call AUC | .883 | .881 | .885 | .891 | .889 | .883 | .885 | .889 | .906 | .905 | .898 | .895 | .886 | .884 | .883 | .895 |
+| fold SD | .029 | .032 | .030 | .028 | .029 | .029 | .027 | .026 | .029 | .029 | .028 | .027 | .024 | .022 | .018 | .016 |
+
+## Overall reading for step 2
+
+- At the start of the communication phase, the agent's coming verdict is mostly predictable
+  from what already happened: the previous episode's outcome gives 0.896 AUC.
+- The activations reproduce that and add a small, consistent extra (+0.007 at A, +0.013 at
+  A_call; better in 19/25 folds each).
+- That is weak evidence that something beyond the feedback history is already present before
+  any message is sent. It is not evidence of a decision that is settled before the agreement.
