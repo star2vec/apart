@@ -88,7 +88,11 @@ def main() -> None:
             model=pins.SERVED_MODEL_NAME, prompt=p_ids + r_ids, max_tokens=1, temperature=1.0,
             extra_body={"prompt_logprobs": 0},
         )
-        entries = forced.model_extra["prompt_logprobs"] if forced.model_extra else forced.choices[0].model_extra["prompt_logprobs"]
+        # vLLM puts prompt_logprobs on the choice; accept the top level too.
+        entries = (forced.choices[0].model_extra or {}).get("prompt_logprobs") or (
+            forced.model_extra or {}).get("prompt_logprobs")
+        if entries is None:
+            raise ValueError("no prompt_logprobs in response: " + forced.model_dump_json()[:400])
         lp = [entries[len(p_ids) + i][str(t)]["logprob"] for i, t in enumerate(r_ids)]
 
         sampled = client.completions.create(

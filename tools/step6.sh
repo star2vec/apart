@@ -5,17 +5,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 WIRE="$1"
+FROM="${2:-1}"  # first stage to run (1-4), to resume after a failure
 OUT=agent-collusion/results/step6
 mkdir -p "$OUT"
 stamp() { date '+%F %T %z'; }
 
 echo "[$(stamp)] 1/4 boot: waking server"
-curl -sL --max-redirs 40 -m 1200 -o /dev/null \
+[ "$FROM" -le 1 ] && curl -sL --max-redirs 40 -m 1200 -o /dev/null \
   -w "health http=%{http_code} total_s=%{time_total}\n" \
   https://star2vec--qwen36-vllm-serve.us-east.modal.run/health
 
 echo "[$(stamp)] 2/4 teacher forcing"
-tools/.venv/bin/python tools/teacher_force.py --wire "$WIRE" --samples 3 \
+[ "$FROM" -le 2 ] && tools/.venv/bin/python tools/teacher_force.py --wire "$WIRE" --samples 3 \
   --pick rep049:1:alice rep023:1:alice rep024:1:bob rep001:2:alice rep001:4:alice \
   --out "$OUT/teacher_force.json"
 
