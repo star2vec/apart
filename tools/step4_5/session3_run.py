@@ -9,6 +9,10 @@ request loop, deadline, grace, watchdog and resume). A call's five edits are sen
 share the prompt up to the first removed message); calls alternate between the random group and
 the hard cases, so a deadline cut leaves both groups covered.
 Writes agent-collusion/results/step4_5/session3_responses.jsonl.
+
+Final round: --edits session4_edits.jsonl --out-name session4_responses.jsonl --priority
+own_messages,feedback_reversed sends every own_messages request (calls alternating between the
+groups) before any feedback_reversed one, so a deadline cut falls on the second edit only.
 """
 
 import argparse
@@ -21,8 +25,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_session as rs  # noqa: E402
 
 
-def build_requests(samples):
-    rows = [json.loads(l) for l in open(rs.OUT / "session3_edits.jsonl")]
+def build_requests(samples, edits="session3_edits.jsonl", priority=None):
+    rows = [json.loads(l) for l in open(rs.OUT / edits)]
+    if priority:  # one pass per edit, in this order
+        return [r for name in priority for r in build_requests_from([x for x in rows if x["removal"] == name], samples)]
+    return build_requests_from(rows, samples)
+
+
+def build_requests_from(rows, samples):
     by_call = {}
     for r in rows:
         by_call.setdefault(r["job"], []).append(r)
@@ -51,8 +61,10 @@ def main() -> None:
     p.add_argument("--base", default=None)
     p.add_argument("--out-name", default="session3_responses.jsonl")
     p.add_argument("--deadline-at", type=float, default=None)
+    p.add_argument("--edits", default="session3_edits.jsonl")
+    p.add_argument("--priority", default="", help="comma-separated edit names, sent in this order")
     a = p.parse_args()
-    reqs = build_requests(a.samples)
+    reqs = build_requests(a.samples, a.edits, [x for x in a.priority.split(",") if x])
     by = {}
     for r in reqs:
         by[(r["group"], r["part"])] = by.get((r["group"], r["part"]), 0) + r["n"]
