@@ -84,6 +84,7 @@ def main() -> None:
     parser.add_argument("--strengths", default="2,4", help="multiples of the projection SD at C")
     parser.add_argument("--samples", type=int, default=4)
     parser.add_argument("--max-new-tokens", type=int, default=6144)
+    parser.add_argument("--unsteered-only", action="store_true", help="check run: only the unsteered condition")
     parser.add_argument("--c-only", action="store_true", help="add the strongest-strength C-only condition")
     parser.add_argument("--out", required=True)
     parser.add_argument("--device", default="cuda")
@@ -113,6 +114,25 @@ def main() -> None:
     load_s = time.time() - t_start
     log = {"load_s": round(load_s, 1), "strengths_sd": strengths, "sd": sd, "layer": args.layer, "calls": []}
     jobs = json.loads(Path(args.jobs).read_text())
+    log["teacher_forcing"] = []
+    for job in [j for j in jobs if "reply_ids" in j]:
+        # one forward over prompt + saved reply; raw log-probs of the reply tokens (as vLLM prompt_logprobs)
+        p_ids, r_ids = job["token_ids"], job["reply_ids"]
+        steer.set(None)
+        with torch.inference_mode():
+            out_ = model(input_ids=torch.tensor([p_ids + r_ids], device=args.device), use_cache=False,
+                         logits_to_keep=len(r_ids) + 1)
+            lp = torch.log_softmax(out_.logits[0, :-1].float(), -1)
+            tok_lp = lp.gather(1, torch.tensor(r_ids, device=args.device)[:, None])[:, 0].cpu().tolist()
+        del out_, lp
+        cut = job["think_end"]
+        rec = {"id": job["id"], "n": len(r_ids), "mean": round(float(np.mean(tok_lp)), 4),
+               "reasoning_mean": round(float(np.mean(tok_lp[:cut])), 4) if cut else None,
+               "after_think_mean": round(float(np.mean(tok_lp[cut:])), 4), "min": round(float(min(tok_lp)), 3),
+               "vllm": job.get("vllm")}
+        log["teacher_forcing"].append(rec)
+        print(json.dumps({"teacher_forcing": rec}), flush=True)
+    jobs = [j for j in jobs if "reply_ids" not in j]
     for job in jobs:
         if args.deadline_s and time.time() - t_start > args.deadline_s:
             log["stopped_for_deadline"] = job["id"]
@@ -130,11 +150,12 @@ def main() -> None:
         del prefill
         prefill_s = time.time() - t0
         conditions = [("unsteered", None, None, 0.0, False)]
-        for k in strengths:
+        for k in ([] if args.unsteered_only else strengths):
             conditions.append((f"target_{k:g}sd", "add", u, sign * k * sd, False))
-        for k in strengths:
+        for k in ([] if args.unsteered_only else strengths):
             conditions.append((f"random_{k:g}sd", "add", r, sign * k * sd, False))
-        conditions.append(("ablate", "ablate", u, 0.0, False))
+        if not args.unsteered_only:
+            conditions.append(("ablate", "ablate", u, 0.0, False))
         if args.c_only:
             conditions.append((f"target_{max(strengths):g}sd_C_only", "add", u, sign * max(strengths) * sd, True))
         call_log = {"id": job["id"], "n_prompt_tokens": len(ids), "prefill_s": round(prefill_s, 1), "conditions": []}

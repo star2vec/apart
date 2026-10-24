@@ -39,7 +39,7 @@ app = modal.App("qwen36-steer")
 @app.function(image=image, gpu=GPU, volumes={WEIGHTS_DIR: weights_volume, ACTS_DIR: acts_volume},
               timeout=60 * MINUTES, max_containers=1)
 def steer(tag: str, layer: int, strengths: str, samples: int, max_new_tokens: int, c_only: bool,
-          timeout_s: int) -> dict:
+          timeout_s: int, unsteered_only: bool = False) -> dict:
     started = time.time()
     acts_volume.reload()
     inp = Path(ACTS_DIR) / tag / "inputs"
@@ -60,6 +60,8 @@ def steer(tag: str, layer: int, strengths: str, samples: int, max_new_tokens: in
            "--deadline-s", str(int(timeout_s - (time.time() - started) - 180))]
     if c_only:
         cmd.append("--c-only")
+    if unsteered_only:
+        cmd.append("--unsteered-only")
     code = subprocess.run(cmd).returncode
     stop.set()
     th.join()
@@ -71,11 +73,11 @@ def steer(tag: str, layer: int, strengths: str, samples: int, max_new_tokens: in
 @app.local_entrypoint()
 def main(jobs: str, tag: str, direction: str, random_direction: str, layer: int = 47, strengths: str = "2,4",
          samples: int = 4, max_new_tokens: int = 6144, c_only: bool = False, timeout_min: int = 45,
-         go: bool = False) -> None:
+         unsteered_only: bool = False, go: bool = False) -> None:
     batch = json.loads(Path(jobs).read_text())
-    n_cond = 1 + 2 * len(strengths.split(",")) + 1 + (1 if c_only else 0)
+    n_cond = 1 if unsteered_only else 1 + 2 * len(strengths.split(",")) + 1 + (1 if c_only else 0)
     print(f"{len(batch)} calls x {n_cond} conditions x {samples} samples, layer {layer}, strengths {strengths} SD; "
-          f"longest prompt {max(len(j['token_ids']) for j in batch):,} tokens; hard timeout {timeout_min} min "
+          f"longest prompt {max(len(j['token_ids']) + len(j.get('reply_ids', [])) for j in batch):,} tokens; hard timeout {timeout_min} min "
           f"= ${timeout_min / 60 * HOURLY_USD:.2f} at most")
     if not go:
         print("plan only; pass --go to start the GPU")
@@ -86,10 +88,12 @@ def main(jobs: str, tag: str, direction: str, random_direction: str, layer: int 
         up.put_file(random_direction, f"/{tag}/inputs/random_direction.npz")
     t0 = time.time()
     res = steer.with_options(timeout=timeout_min * MINUTES).remote(tag, layer, strengths, samples, max_new_tokens,
-                                                                    c_only, timeout_min * MINUTES)
+                                                                    c_only, timeout_min * MINUTES, unsteered_only)
     wall = (time.time() - t0) / 60
     log = res.pop("log") or {}
     print(json.dumps(res))
+    for t in log.get("teacher_forcing", []):
+        print("teacher forcing", json.dumps(t))
     for c in log.get("calls", []):
         print(json.dumps({k: c[k] for k in ("id", "n_prompt_tokens", "prefill_s", "peak_gpu_gib")}))
         for cond in c["conditions"]:
