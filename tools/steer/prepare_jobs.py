@@ -17,10 +17,14 @@ RES = ROOT / "agent-collusion" / "results"
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--set", choices=["pilot", "main"], required=True)
+    p.add_argument("--set", choices=["pilot", "main", "reduced"], required=True)
     a = p.parse_args()
     calls = json.loads((RES / "steer" / "steer_calls.json").read_text())
-    chosen = {j: c for j, c in calls.items() if c["pilot"] or a.set == "main"}
+    if a.set == "reduced":  # hard cases + the first 3 settled accepts
+        acc = [j for j, c in calls.items() if c["group"] == "settled_accept"][:3]
+        chosen = {j: c for j, c in calls.items() if c["group"] == "hard" or j in acc}
+    else:
+        chosen = {j: c for j, c in calls.items() if c["pilot"] or a.set == "main"}
     meta = {c["job"]: c for c in map(json.loads, open(RES / "step6" / "calls.jsonl")) if c["job"] in chosen}
     jobs = []
     for line in open(RES / "step6" / "jobs.jsonl"):
@@ -32,7 +36,8 @@ def main() -> None:
             jobs.append({"id": j["id"], "token_ids": ids, "c_token": m["c_token"],
                          "target_sign": chosen[j["id"]]["target_sign"], "group": chosen[j["id"]]["group"],
                          "share_A_vllm": chosen[j["id"]]["share_A_vllm"]})
-    jobs.sort(key=lambda j: -len(j["token_ids"]))
+    # hard cases first (a deadline cut drops settled calls), longest prompt first within each group
+    jobs.sort(key=lambda j: (j["group"] != "hard", -len(j["token_ids"])))
     out = RES / "steer" / f"jobs_{a.set}.json"
     out.write_text(json.dumps(jobs))
     print(out, [(j["id"], len(j["token_ids"]), j["group"], j["target_sign"], j["share_A_vllm"]) for j in jobs])

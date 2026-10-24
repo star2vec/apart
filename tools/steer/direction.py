@@ -83,8 +83,10 @@ def main() -> None:
                         "projection_at_C_sd_units": round(float((pk - proj[train].mean()) / sd), 3),
                         # sign of the push: toward reject for accepts and hard cases, toward accept for rejects
                         "target_sign": +1 if name == "settled_reject" else -1}
+    # mean-ablation target: the midpoint of the class means (the direction's decision boundary)
+    abl_mean = float((proj[train & (y == 1)].mean() + proj[train & (y == 0)].mean()) / 2)
     np.savez(OUT / "direction.npz", unit=u.astype(np.float32), sd=sd, gap=gap, layer=LAYER,
-             train_mean=float(proj[train].mean()))
+             train_mean=float(proj[train].mean()), abl_mean=abl_mean)
     rng = np.random.default_rng(0)
     r = rng.normal(size=u.shape)
     r -= (r @ u) * u
@@ -93,7 +95,8 @@ def main() -> None:
            "n_train_runs": len({r["run"] for r in tr_rows}), "n_held_out_rows": int(held.sum()),
            "cv_within_auc": pl.summarise([{"test_auc": v} for v in aucs]),
            "held_out_auc": round(float(pl.auc(y[held], proj[held])), 4),
-           "projection_sd": round(sd, 3), "class_gap": round(gap, 3), "class_gap_sd_units": round(gap / sd, 3),
+           "projection_sd": round(sd, 3), "mean_ablation_target": round(abl_mean, 3),
+           "class_means": [round(float(proj[train & (y == 1)].mean()), 3), round(float(proj[train & (y == 0)].mean()), 3)], "class_gap": round(gap, 3), "class_gap_sd_units": round(gap / sd, 3),
            "within_class_sd_units": {"accept": round(float(proj[train & (y == 1)].std() / sd), 3),
                                      "reject": round(float(proj[train & (y == 0)].std() / sd), 3)},
            "norm_of_mean_difference": round(float(np.linalg.norm(d)), 3),
