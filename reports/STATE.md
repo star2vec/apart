@@ -1,4 +1,4 @@
-# State of the project (2026-10-24, evening)
+# State of the project (2026-10-25)
 
 ## The story so far
 
@@ -30,6 +30,23 @@ unchanged (0.62). Setting the projection to the class midpoint (mean-ablation) d
 so the direction is a lever, but removing its mean does not erase the decision. At 4 SD a third
 of the target samples loop; at 2 SD (2 calls) the effect is the same with no loops.
 
+Session 3 (`2026-10-25-session3-steering-and-ingredients.md`) extends this:
+- **Both ways at 2 SD.** Toward reject removes every accept on all 10 hard cases. Toward accept
+  makes every valid sample accept on 5 hard cases, but flips only 2 of 5 settled rejects, partly.
+  On 2 hard cases the random direction also moves toward accept.
+- **The push has to continue through the thinking.** The same 2 SD at the C token alone barely
+  moves anything (hard cases 0.70 → 0.57; 4 SD at C does nothing).
+- **The thinking argues for whatever verdict comes out** (79–100% of samples per condition).
+- **The decision is partly a general approve/reject signal.** A direction from unrelated review
+  tasks has cosine 0.14 with the C direction, yet separates the game's calls at C (AUC 0.91), and
+  pushing along it lowers the share 0.70 → 0.47.
+- **Mean-ablation at layers 31–63 at once** does not remove the decision either (0.70 → 0.76).
+- **What the verdict needs in the context.** Without this episode's conversation, accept falls to
+  about 0.1 in both groups. Removing all earlier feedback lowers accept about twice as much as
+  removing only the last block. Reverted rejects depend on the conversation, not the feedback.
+- **The C probe beats the full saved thinking** at predicting resampled shares on hard cases
+  (Spearman 0.74 vs 0.18).
+
 ## Reports, in order
 
 | Report | Contents |
@@ -40,6 +57,8 @@ of the target samples loop; at 2 SD (2 calls) the effect is the same with no loo
 | `2026-10-23-step6-projections.md` | Step 6: the C probe through each verdict call's own thinking; separation by tenth (C probe and fresh probes); lock-in point vs the first verdict statement; edited prompts at C; reverted calls as case studies. |
 | `2026-10-24-step4-5-resampling.md` | Steps 4–5, vLLM session 1: full resamples from C, continuations from cuts of the saved thinking, flips, edited prompts (variant B) resampled. |
 | `2026-10-24-session2-and-steering-pilot.md` | Baselines vs resampled shares, flip base rates, steering direction, predictors by cut. vLLM session 2: thinking off, feedback edit, from A with the peer replayed. The session-2 cost overrun and its fix. Steering pilot and the sizing of the main run. |
+| `STATE.md`, section "Steering design A" | Run A (4 SD, 13 calls) and the 2 SD rerun: per-call tables, invalids, stop rule, crashes and fixes. |
+| `2026-10-25-session3-steering-and-ingredients.md` | Four predictors vs resampled shares; thinking of steered samples; steering session 3 (both ways at 2 SD, C only); the contrast direction from unrelated tasks; multi-layer mean-ablation; vLLM session 3 (ingredient removal at C). |
 
 ## Where the data lives
 
@@ -59,7 +78,12 @@ Everything below is under `agent-collusion/results/` (git-ignored) unless noted.
 | Steering pilot and check outputs | `steer/pilot/out/`, `steer/check/out/` |
 | Steering design A (4 SD, 13 calls) | `steer/A/out/` (one file per call and condition, with sample texts; `_log.json` from the last run, earlier one in `steer/A/_log_resume1.json`); Modal Volume `qwen36-activations:/steer-A/out` |
 | Steering at 2 SD (2 calls) | `steer/A2/out/`, job list `steer/jobs_2sd.json`; Volume `/steer-A-2sd/out` |
-| Steering run logs | `steer/logs/steer-A.log`, `steer-A-resume.log`, `steer-A-resume2.log`, `steer-A-2sd.log` |
+| Steering run logs | `steer/logs/steer-A.log`, `steer-A-resume.log`, `steer-A-resume2.log`, `steer-A-2sd.log`, `steer-S3.log`, `steer-I34.log` |
+| Steering session 3, items 1–2 | `steer/S3/out/` (per call and condition, with texts), `steer/S3/report.json`; jobs `steer/jobs_session3.json`; Volume `/steer-S3/out` |
+| Steering items 3–4 | `steer/I34/out/` (incl. `contrast_direction.npz/.json`), `steer/I34/report.json`; jobs `steer/jobs_items34.json`; inputs `steer/contrast_prompts.json`, `c_acts_l47.npz`, `layer_directions.npz/.json`; Volume `/steer-I34/out` |
+| Thinking classes of steered samples | `steer/thinking_classes.json` |
+| Ingredient removal (vLLM session 3) | `step4_5/session3_edits.jsonl` (466 edited requests), `session3_responses.jsonl`, `session3_analysis.json`, `session3.log` |
+| Four predictors vs resampled shares | `step4_5/four_predictors.json` |
 | Figures (in git) | `reports/figures/step3/`, `step3_prev_reject/`, `step4_5/`, `step6/` |
 
 ## Unsteered check and the mean-ablation value
@@ -157,13 +181,22 @@ about twice that), so the 6144-token cap was lowered to 4096 from call 2 on.
 
 ## Next
 
-No GPU work is planned. To do on the Mac: write the steering report (from the tables above and
-the sample texts), and finish the 2 SD comparison only if more GPU time is approved.
+No GPU work is planned. Open questions that would need GPU time (ask first):
+- **Random controls.** Several random vectors at 2 SD on the hard cases where one random vector
+  also moved toward accept (rep011, rep013.bob.ep02): is accept where the model goes under any
+  perturbation there?
+- **Matching the contrast push.** The contrast direction at a strength matched in absolute size to
+  the C direction's 2 SD: is its weaker effect only a matter of step size?
+- **More samples.** 6 per condition leaves per-call numbers noisy.
+
+On the Mac: the write-up for the sprint submission from the reports.
 
 ## Modal
 
-Metered so far: **$50.31** (`modal billing summary`, 2026-10-24 18:20), all covered by credits,
-billed $0.00. About $29.50 of credit left by that count (check the dashboard).
+Session 3 cost **$20.66**: steering items 1–2 $5.56, items 3–4 $1.79, vLLM item 5 ≈ $13.30 (its
+deadline was extended twice on approval). No job ran past its stop. Metered total **$70.66**
+(`modal billing summary`, 2026-10-25 02:00), all covered by credits, billed $0.00. The dashboard
+showed $30 before session 3, so about **$9.30** is left (check the dashboard).
 
 ## Rules
 
