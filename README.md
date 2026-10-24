@@ -25,6 +25,7 @@ Qwen3.6-27B served with vLLM on Modal.
     ├── step1_cache/         # step 1: rebuild comm prompts, positions, index; check and pack the download
     ├── step2/               # step 2: probe at A, baselines, null, control, follow-ups
     ├── step3/               # step 3: probe traced through the exchange, probe at C, transfer
+    ├── step4_5/             # steps 4-5: flips, call list, vLLM resampling session, analysis
     ├── step5/               # step 5: agreement lines removed from agreement-onset prompts
     ├── step6/               # step 6: probes, jobs, verdict statements, analysis of the projections
     ├── paper_prompts/       # rebuild and render the paper's verdict calls
@@ -54,11 +55,11 @@ On the paper's 50 Qwen 3.6 main trajectories and their judge labels.
 | 1. Activation cache | done 2026-10-23: 200 passes (per run and agent: the last episode's communication-phase history and its last verdict prompt, each with its own phase's tool list), 14.26M tokens, whole passes (longest 93,645 tokens, peak 69.0 GiB); residual stream after layers 3, 7, …, 63 at 32,834 positions (A, A_call, every message end, C, verdict, feedback, reflection start/end, runner notices), 5.0 GiB bf16; index in `index.jsonl`. 39.6 H100-minutes, ~$2.61. Modal Volume `qwen36-activations:/cache-v1` |
 | 2. Probe at A | done (Mac): own verdict from A, 348 onset/before-onset rows, trajectory-grouped nested CV; selected-layer AUC 0.888 ± 0.023 vs feedback-features baseline 0.896 ± 0.020 (probe better in 9/25 folds), episode number 0.871, relaxation flag 0.818, shuffled null 0.504; positive control (previous reward) 0.924; probe + feedback 0.903 vs feedback 0.896 (+0.007, 19/25 folds), at A_call 0.910 (+0.013, 19/25). See `reports/2026-10-23-step2-probe-a.md` |
 | 3. Message-by-message probe, probe at C | done (Mac): per-position probes at A, each of 10 message slots and C, out-of-fold per row with the feedback baseline as reference; the probe first beats the feedback baseline at C (0.956 vs 0.905, +0.051 [0.030, 0.071]), overall and on both paths; no message slot does. C probe 0.953 ± 0.018; A↔C transfer partial (A→C 0.70, C→A 0.74); A_call's edge over A sits with the first speaker. Additions: last message vs C +0.048 [0.027, 0.069] (Alice +0.081, Bob +0.017 n.s.); C probe (layer 47) traced everywhere is flat until C, largest rise at C on 36/36 agreement onsets; agents with previous verdict reject (210 rows): first beats feedback at C (+0.110), A probe 0.774 vs feedback 0.784, A_call + feedback +0.038. See `reports/2026-10-23-step3-trace-and-c.md` |
-| 4. Resampling session (vLLM) | |
-| 5. Agreement lines removed | edited prompts built (`tools/step5/`, variants A and B); C-probe score at C in step 6; resampling waits for the vLLM session |
+| 4. Resampling session (vLLM) | done 2026-10-24 with step 5's resampling: 830 requests, 11,680 samples, no capped replies, 44 invalid (task-phase tool calls on the completions endpoint); ≈134 H100-min, ≈$8.80 (cap raised to $15). Typical calls are decided at C: resampling reproduces the saved verdict 91% and tracks the C probe (ρ 0.87); "confidently wrong" probe calls follow the probe 9/10; reverted rejects and flips settle gradually through the thinking. See `reports/2026-10-24-step4-5-resampling.md` |
+| 5. Agreement lines removed | edited prompts (`tools/step5/`); C-probe score at C barely moves (step 6); variant B resampled at C: share ACCEPT 0.927 (11 paired calls 0.847 vs 0.966 unedited) |
 | 6. Projections session (transformers) | done 2026-10-23: 388 verdict calls + own thinking and 72 edited prompts, C probe (layer 47) per token, 27.0 H100-min (~$1.78). ACCEPT vs REJECT separation: C 0.942, first tenths of thinking 0.86 (fresh probe), last tenth 0.99; lock-in median at 92% of the thinking, about where the text first states the verdict; agreement lines removed barely move the C score (0.976 → 0.940); reverted calls often lean accept at C and reject in the thinking. See `reports/2026-10-23-step6-projections.md` |
 
-GPU spend to date: about 172 H100-minutes (~$11.40), including one failed 31-minute start.
+GPU spend to date: about 306 H100-minutes (~$20.20), including one failed 31-minute start.
 Run outputs (`agent-collusion/results/`) are git-ignored.
 
 ## Source

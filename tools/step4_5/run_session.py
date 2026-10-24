@@ -66,6 +66,11 @@ def load_requests(plan):
     return reqs
 
 
+def reorder(reqs, order):
+    rank = {g: i for i, g in enumerate(order)}
+    return sorted(reqs, key=lambda r: rank[r["group"]])  # stable: keeps each call's requests together
+
+
 def verdict_from_chat(choice):
     msg = choice.get("message") or {}
     for tc in msg.get("tool_calls") or []:
@@ -102,7 +107,7 @@ async def run(args, reqs):
     todo = [r for r in reqs if r["key"] not in done]
     print(f"{len(reqs)} requests, {len(done)} already done, {len(todo)} to send", flush=True)
     t0 = time.time()
-    deadline = t0 + args.deadline_min * 60
+    deadline = args.deadline_at if args.deadline_at else t0 + args.deadline_min * 60
     lock = asyncio.Lock()
     sem = asyncio.Semaphore(args.parallel)
     client = httpx.AsyncClient(base_url=base, headers={"Authorization": f"Bearer {key}"},
@@ -156,7 +161,7 @@ async def run(args, reqs):
                           f"(ok {stats['ok']}, errors {stats['error']})", flush=True)
 
     seeds = {r["key"]: 1000 + i for i, r in enumerate(reqs)}
-    hard_stop = t0 + (args.deadline_min + args.grace_min) * 60
+    hard_stop = deadline + args.grace_min * 60
     for attempt in range(1 + args.retries):
         tasks = [asyncio.ensure_future(one(r, seeds[r["key"]])) for r in todo]
         try:
@@ -186,10 +191,12 @@ def main() -> None:
     parser.add_argument("--request-timeout-min", type=float, default=40)
     parser.add_argument("--base", default=None, help="override server URL (offline tests)")
     parser.add_argument("--out-name", default="responses.jsonl")
+    parser.add_argument("--order", default="chosen,random,edit", help="group priority")
+    parser.add_argument("--deadline-at", type=float, default=None, help="absolute unix time for the deadline (restarts)")
     args = parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     plan = json.loads((OUT / "plan.json").read_text())
-    reqs = load_requests(plan)
+    reqs = reorder(load_requests(plan), args.order.split(","))
     by = {}
     for r in reqs:
         by[(r["group"], r["part"])] = by.get((r["group"], r["part"]), 0) + r["n"]
