@@ -17,6 +17,15 @@ positive multiple pushes the target toward the job's target verdict, a negative 
 and the random vector is the one runs A and A2 used); where "from_c" (every position from C on)
 or "c_only" (the C token only: the first position of the first forward step, which processes C,
 <think>, "\n"). Without "conds", the conditions come from --strength / --unsteered as before.
+Two more kinds (items 3-4 of the third steering session):
+  vector "contrast"   the approve-vs-reject direction from --contrast-prompts (unrelated review
+                      tasks): mean(approve) - mean(reject) of the layer's output at each prompt's
+                      C-type token ("\n" after <|im_start|>assistant), computed here before the
+                      jobs; its strength unit is the SD of the projection of --c-acts (the game's
+                      C activations on the training trajectories) onto it. Cosine with the C
+                      direction and both separations are written to contrast_direction.json.
+  kind "mean_abl_layers"  at every layer of --layer-directions at once, the projection on that
+                      layer's own decision direction set to that layer's class midpoint, from C on.
 Sampling: temperature 1.0, top_p 0.95, top_k 20 (the served generation config). Verdict read
 from <parameter=verdict>; invalid if it hit max_new_tokens or has no verdict.
 """
@@ -46,6 +55,58 @@ def text_model(model):
         if hasattr(mod, "layers") and hasattr(mod, "embed_tokens"):
             return mod
     raise RuntimeError("no text model")
+
+
+class LayerAbl:
+    """Mean-ablation on one layer's own direction for the rows in `mask` (items 4)."""
+
+    def __init__(self, u, m):
+        self.u, self.m, self.mask = u, m, None
+
+    def __call__(self, module, args, output):
+        if self.mask is None or not bool(self.mask.any()):
+            return output
+        h = output[0] if isinstance(output, tuple) else output
+        u = self.u.to(h.dtype)
+        shift = ((h @ u) - self.m) * self.mask.to(h.dtype)[:, None]
+        h = h - shift.unsqueeze(-1) * u
+        return (h,) + tuple(output[1:]) if isinstance(output, tuple) else h
+
+
+def contrast_direction(model, lm, layer, prompts, c_acts, u, device, out):
+    """mean(approve) - mean(reject) of the layer output at each prompt's C-type token."""
+    got = {}
+
+    def hook(module, args, output):
+        got["h"] = (output[0] if isinstance(output, tuple) else output)[0, -1].float()
+    h = lm.layers[layer].register_forward_hook(hook)
+    acts, labels = [], []
+    with torch.inference_mode():
+        for pr in prompts:
+            model(input_ids=torch.tensor([pr["token_ids"][:pr["c_token"] + 1]], device=device), use_cache=False)
+            acts.append(got["h"].clone())
+            labels.append(pr["label"] == "approve")
+    h.remove()
+    A = torch.stack(acts)
+    lab = torch.tensor(labels, device=A.device)
+    d = A[lab].mean(0) - A[~lab].mean(0)
+    uc = d / d.norm()
+    C = torch.tensor(c_acts["acts"], dtype=torch.float32, device=A.device)
+    yc = torch.tensor(c_acts["y"], device=A.device).bool()
+    pc = C @ uc
+
+    def auc(score, y):
+        s, yy = score.cpu().numpy(), y.cpu().numpy()
+        pos, neg = s[yy], s[~yy]
+        return float((pos[:, None] > neg[None, :]).mean() + 0.5 * (pos[:, None] == neg[None, :]).mean())
+    info = {"n_prompts": len(prompts), "cosine_with_C_direction": float(uc @ u),
+            "sd_at_C": float(pc.std()), "gap_at_C_sd_units": float((pc[yc].mean() - pc[~yc].mean()) / pc.std()),
+            "auc_at_C_game_rows": auc(pc, yc), "auc_contrast_prompts_on_C_direction": auc(A @ u, lab),
+            "auc_contrast_prompts_on_own_direction_in_sample": auc(A @ uc, lab)}
+    np.savez(out / "contrast_direction.npz", unit=uc.cpu().numpy(), sd=info["sd_at_C"])
+    (out / "contrast_direction.json").write_text(json.dumps(info, indent=1))
+    print(json.dumps({"contrast_direction": info}), flush=True)
+    return uc, info["sd_at_C"]
 
 
 class RowSteer:
@@ -94,6 +155,9 @@ def main() -> None:
     p.add_argument("--mem-budget-gib", type=float, default=76.0, help="peak memory to aim for")
     p.add_argument("--expected-new-tokens", type=int, default=2500, help="for the per-row memory estimate")
     p.add_argument("--max-batch", type=int, default=64)
+    p.add_argument("--contrast-prompts", default=None, help="json from tools/steer/contrast_prompts.py (item 3)")
+    p.add_argument("--c-acts", default=None, help="npz of the game's C activations at --layer (item 3 strength unit)")
+    p.add_argument("--layer-directions", default=None, help="npz from tools/steer/layer_directions.py (item 4)")
     p.add_argument("--mem-factor", type=float, default=1.0,
                    help="multiplies the per-row memory estimate (run A: the first batch at 1.0 ran out of memory at ~2x)")
     p.add_argument("--out", required=True)
@@ -118,6 +182,17 @@ def main() -> None:
     u = torch.tensor(d["unit"], dtype=torch.float32, device=a.device)
     sd, m = float(d["sd"]), float(d["abl_mean"])
     rnd = torch.tensor(np.load(a.random_direction)["unit"], dtype=torch.float32, device=a.device)
+    vec_sd = {"target": sd, "random": sd}
+    vecs = {"target": u, "random": rnd}
+    if a.contrast_prompts:
+        vecs["contrast"], vec_sd["contrast"] = contrast_direction(
+            model, lm, a.layer, json.loads(Path(a.contrast_prompts).read_text()), np.load(a.c_acts), u, a.device, out)
+    layer_abl = []
+    if a.layer_directions:
+        ld = np.load(a.layer_directions)
+        for li, ul, ml in zip(ld["layers"].tolist(), ld["units"], ld["abl_mean"].tolist()):
+            la = LayerAbl(torch.tensor(ul, dtype=torch.float32, device=a.device), ml)
+            layer_abl.append((la, lm.layers[li].register_forward_hook(la)))
     steer = RowSteer()
     handle = lm.layers[a.layer].register_forward_hook(steer)
     eos = model.generation_config.eos_token_id
@@ -181,11 +256,14 @@ def main() -> None:
             c_only = torch.zeros(len(batch), dtype=torch.bool, device=a.device)
             for r, (name, kind, _) in enumerate(batch):
                 cd = spec[name]
-                if kind == "add":  # multiple * SD * target_sign * (u or the random unit vector)
-                    offsets[r] = cd[3] * sd * sign * (u if cd[2] == "target" else rnd)
+                if kind == "add":  # multiple * SD (of that vector's projection at C) * target_sign * unit vector
+                    offsets[r] = cd[3] * vec_sd[cd[2]] * sign * vecs[cd[2]]
                 elif kind == "mean_abl":
                     abl[r] = True
                 c_only[r] = cd[4] == "c_only"
+            multi = torch.tensor([spec[name][1] == "mean_abl_layers" for name, _, _ in batch], device=a.device)
+            for la, _ in layer_abl:
+                la.mask = multi
             try:
                 cache = copy.deepcopy(base)
                 cache.reorder_cache(torch.zeros(len(batch), dtype=torch.long, device=a.device))
@@ -200,6 +278,8 @@ def main() -> None:
                 gen_s = time.time() - t1
             except torch.OutOfMemoryError:
                 steer.set()
+                for la, _ in layer_abl:
+                    la.mask = None
                 cache = seqs = None
                 if cuda:
                     torch.cuda.empty_cache()
@@ -209,6 +289,8 @@ def main() -> None:
                 bs = max(1, bs // 2)
                 continue
             steer.set()
+            for la, _ in layer_abl:
+                la.mask = None
             for (name, kind, k), row in zip(batch, seqs[:, len(ids):].tolist()):
                 n_new = next((j + 1 for j, t in enumerate(row) if t in eos), len(row))
                 capped = n_new >= a.max_new_tokens and not any(t in eos for t in row)
@@ -234,6 +316,8 @@ def main() -> None:
                           "peak_gpu_gib": call["peak_gpu_gib"]}), flush=True)
         del base
     handle.remove()
+    for _, hd in layer_abl:
+        hd.remove()
     log["total_s"] = round(time.time() - t_start, 1)
     (out / "_log.json").write_text(json.dumps(log, indent=1))
 
