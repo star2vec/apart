@@ -87,6 +87,8 @@ def main() -> None:
     a = p.parse_args()
     t_start = time.time()
     cuda = a.device == "cuda"
+    if cuda:  # the cuDNN attention kernel failed mid-run (mha_graph.execute not good); use flash / mem-efficient
+        torch.backends.cuda.enable_cudnn_sdp(False)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     config = transformers.AutoConfig.from_pretrained(a.model)
