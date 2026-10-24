@@ -109,7 +109,7 @@ def main(jobs: str, tag: str, direction: str, random_direction: str, layer: int 
         print("teacher forcing", json.dumps(t))
     for c in log.get("calls", []):
         print(json.dumps({k: c.get(k) for k in ("id", "n_prompt_tokens", "prefill_s", "peak_gpu_gib", "batches")}))
-        conds = c["conditions"]
+        conds = c.get("conditions", {})
         for cond in (conds.items() if isinstance(conds, dict) else enumerate(conds)):
             print("   ", json.dumps(cond))
     print(f"GPU: container {res['container_s'] / 60:.1f} min, call wall {wall:.1f} min ~ ${wall / 60 * HOURLY_USD:.2f}")

@@ -116,12 +116,17 @@ def main() -> None:
         alpha = sign * a.strength * sd
         conds = ([("unsteered", "none")] if a.unsteered else []) + [
             (f"target_{a.strength:g}sd", "target"), (f"random_{a.strength:g}sd", "random"), ("mean_ablate", "mean_abl")]
+        if all((out / f"{job['id']}.{name}.json").exists() for name, _ in conds):  # resume: done in an earlier run
+            log["calls"].append({"id": job["id"], "skipped_done": True})
+            continue
         rows = [(name, kind, k) for name, kind in conds for k in range(a.samples)]
         if cuda:
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
         t0 = time.time()
         steer.set()
+        if hasattr(model.model, "rope_deltas"):  # else the prefill keeps the last batch's [B, 1] offsets
+            model.model.rope_deltas = None
         with torch.inference_mode():
             base = model(input_ids=torch.tensor([ids[:c]], device=a.device), use_cache=True).past_key_values
         prefill_s = time.time() - t0
