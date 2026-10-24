@@ -100,17 +100,26 @@ On the paper's 50 Qwen 3.6 main trajectories and their judge labels.
 | 5. Agreement lines removed | edited prompts (`tools/step5/`); C-probe score at C barely moves (step 6); variant B resampled at C: share ACCEPT 0.927 (11 paired calls 0.847 vs 0.966 unedited) |
 | 6. Projections session (transformers) | done 2026-10-23 (Volume `qwen36-activations:/step6`): 388 verdict calls + own thinking and 72 edited prompts, C probe (layer 47) per token, 27.0 H100-min (~$1.78). ACCEPT vs REJECT separation: C 0.942, first tenths of thinking 0.86 (fresh probe), last tenth 0.99; lock-in median at 92% of the thinking, about where the text first states the verdict; agreement lines removed barely move the C score (0.976 → 0.940); reverted calls often lean accept at C and reject in the thinking. See `reports/2026-10-23-step6-projections.md` |
 
-GPU spend to date: about 306 H100-minutes (~$20.20), including one failed 31-minute start.
+GPU spend to date: about 455–490 H100-minutes (~$30–32), including one failed 31-minute start and a session-2 overrun (see `reports/2026-10-24-session2-and-steering-pilot.md`).
 Run outputs (`agent-collusion/results/`) are git-ignored.
+
+### Session 2 and steering pilot (2026-10-24)
+
+On the random group the feedback baseline predicts resampled shares as well as the C probe
+(ρ 0.85 vs 0.87); the probe only wins on hard cases (0.74 vs −0.09). Telling an agent its previous
+verdict was right removes most onset accepts (0.88 → 0.33). With thinking off, flips mostly
+reject (0.69 → 0.37). Rerunning the communication phase from A with the peer replayed gives
+about the same shares as resampling from C (ρ 0.80). Steering pilot (3 calls, 4 samples):
+the C direction pushes one hard case to reject, random directions are inconclusive; the
+"ablation" condition was a push toward accept (fix: mean-ablation). See
+`reports/2026-10-24-session2-and-steering-pilot.md`.
 
 ### Next (each GPU job waits for approval)
 
 - **D.** Mid-layer rerun of the thinking projections (a layer in 23–31), fresh probes per tenth,
   vectors saved at a newline token in each tenth (transformers).
-- **E.** Steering pilot: remove or push against the C direction at C and during the thinking,
-  3 calls × 8 samples; about 10 calls if verdicts move.
-
-D and E are planned as one transformers session (~$6).
+- **Steering main run** (cap $10): 10 hard cases, 5 settled accepts, 3 settled rejects;
+  proposed as one batched generate per call with per-row steering and mean-ablation.
 
 ## Source
 

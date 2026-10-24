@@ -162,6 +162,17 @@ async def run(args, reqs):
 
     seeds = {r["key"]: 1000 + i for i, r in enumerate(reqs)}
     hard_stop = deadline + args.grace_min * 60
+
+    def watchdog():  # kill the process at the hard stop even if a request hangs (cost cap)
+        import os
+        import threading
+        def watch():
+            while time.time() < hard_stop + 30:
+                time.sleep(5)
+            print("watchdog: hard stop reached, exiting", flush=True)
+            os._exit(3)
+        threading.Thread(target=watch, daemon=True).start()
+    watchdog()
     for attempt in range(1 + args.retries):
         tasks = [asyncio.ensure_future(one(r, seeds[r["key"]])) for r in todo]
         try:

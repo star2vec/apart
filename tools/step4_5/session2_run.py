@@ -45,7 +45,21 @@ def setup_env(base_override):
     os.environ["OPENAI_API_KEY"] = "x" if base_override else env["OPENAI_API_KEY"]
 
 
-def run_episode(spec, sample, max_tokens, effort):
+class PastDeadline(RuntimeError):
+    pass
+
+
+def start_watchdog(hard_stop):
+    """Kill the whole process at the hard stop, whatever threads are doing (cost cap)."""
+    def watch():
+        while time.time() < hard_stop:
+            time.sleep(5)
+        print("watchdog: hard stop reached, exiting", flush=True)
+        os._exit(3)
+    threading.Thread(target=watch, daemon=True).start()
+
+
+def run_episode(spec, sample, max_tokens, effort, deadline=None):
     """One controlled-peer continuation from A; returns the verdict record."""
     import litellm
     from experiments.agents import _select_tools_and_choice, run_agent_turn
@@ -85,6 +99,8 @@ def run_episode(spec, sample, max_tokens, effort):
         messages.append({"role": "user", "content": communication_round_instruction(r + 1, max_rounds)})
         delivered = False
         for attempt in range(COMMUNICATION_ATTEMPTS):
+            if deadline and time.time() > deadline:
+                raise PastDeadline("deadline passed mid-episode")
             reset_message_delivery(state, me)
             turn = run_agent_turn(actor=me, model=MODEL, messages=messages, state=state, tool_choice=tool_choice,
                                   reasoning_effort=effort, temperature=1.0, max_output_tokens=max_tokens)
@@ -104,6 +120,8 @@ def run_episode(spec, sample, max_tokens, effort):
     tools, choice = _select_tools_and_choice(tools=tools, tool_choice=forced_tool_choice(spec["task_type"], "verdict"),
                                              model=MODEL, reasoning_effort=effort)
     extra = get_litellm_completion_kwargs(MODEL, effort, passthrough_params=("tool_choice",))
+    if deadline and time.time() > deadline:
+        raise PastDeadline("deadline passed before the verdict call")
     resp = litellm.completion(model=MODEL, messages=messages, tools=tools, tool_choice=choice, temperature=1.0,
                               max_tokens=max_tokens, num_retries=3, **extra)
     ch = resp.choices[0]
@@ -129,8 +147,10 @@ def run_from_a(args, plan, deadline):
     if out_path.exists():
         done = {json.loads(l)["key"] for l in open(out_path) if json.loads(l).get("status") == "ok"}
     effort = "default"
-    tasks = [(spec, k) for spec in plan["from_a"] for k in range(spec["samples"])
-             if f"{spec['job']}|from_A|{k}" not in done]
+    n_samples = lambda spec: min(spec["samples"], args.from_a_max_samples) if args.from_a_max_samples else spec["samples"]  # noqa: E731
+    # sample-major order: every call gets sample k before any call gets sample k+1
+    tasks = [(spec, k) for k in range(max(n_samples(s) for s in plan["from_a"])) for spec in plan["from_a"]
+             if k < n_samples(spec) and f"{spec['job']}|from_A|{k}" not in done]
     print(f"from A: {len(tasks)} episodes to run ({len(done)} done)", flush=True)
     lock = threading.Lock()
     n = {"ok": 0, "error": 0}
@@ -139,7 +159,7 @@ def run_from_a(args, plan, deadline):
         if time.time() > deadline:
             return None
         try:
-            return run_episode(spec, k, args.max_tokens, effort)
+            return run_episode(spec, k, args.max_tokens, effort, deadline)
         except Exception as e:  # noqa: BLE001
             return {"key": f"{spec['job']}|from_A|{k}", "job": spec["job"], "sample": k, "status": "error",
                     "error": repr(e)[:500]}
@@ -183,6 +203,8 @@ def main() -> None:
     parser.add_argument("--request-timeout-min", type=float, default=40)
     parser.add_argument("--base", default=None, help="override server URL (offline tests)")
     parser.add_argument("--skip-single", action="store_true")
+    parser.add_argument("--from-a-max-samples", type=int, default=0, help="cut samples per call (cost)")
+    parser.add_argument("--deadline-at", type=float, default=None, help="absolute deadline (restarts)")
     parser.add_argument("--test-limit", type=int, default=0, help="offline tests: first N items, 2 samples each")
     args = parser.parse_args()
     plan = json.loads((OUT / "session2_plan.json").read_text())
@@ -209,7 +231,8 @@ def main() -> None:
         return
     setup_env(args.base)
     t0 = time.time()
-    deadline = t0 + args.deadline_min * 60
+    deadline = args.deadline_at or t0 + args.deadline_min * 60
+    start_watchdog(deadline + args.grace_min * 60)
     if not args.skip_single:
         import run_session as rs1
         rs1.OUT = OUT
