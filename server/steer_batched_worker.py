@@ -11,6 +11,12 @@ the layer applies per row, at every position from C on:
   add       h <- h + alpha * v          (target direction, or a random unit direction)
   mean_abl  h <- h - ((h . u) - m) u    (projection on the target direction set to m)
   none      unchanged
+A job may carry its own condition list ("conds": [name, kind, vector, multiple of SD, where]):
+kind add / mean_abl / none; vector target / random, either one times the job's target_sign (so a
+positive multiple pushes the target toward the job's target verdict, a negative one away from it,
+and the random vector is the one runs A and A2 used); where "from_c" (every position from C on)
+or "c_only" (the C token only: the first position of the first forward step, which processes C,
+<think>, "\n"). Without "conds", the conditions come from --strength / --unsteered as before.
 Sampling: temperature 1.0, top_p 0.95, top_k 20 (the served generation config). Verdict read
 from <parameter=verdict>; invalid if it hit max_new_tokens or has no verdict.
 """
@@ -46,17 +52,26 @@ class RowSteer:
     """Per-row additive offsets and mean-ablation masks for the current batch."""
 
     def __init__(self):
-        self.offsets, self.abl_mask, self.u, self.m = None, None, None, 0.0
+        self.offsets, self.abl_mask, self.u, self.m, self.c_only, self.calls = None, None, None, 0.0, None, 0
 
-    def set(self, offsets=None, abl_mask=None, u=None, m=0.0):
-        self.offsets, self.abl_mask, self.u, self.m = offsets, abl_mask, u, m
+    def set(self, offsets=None, abl_mask=None, u=None, m=0.0, c_only=None):
+        self.offsets, self.abl_mask, self.u, self.m, self.c_only, self.calls = offsets, abl_mask, u, m, c_only, 0
 
     def __call__(self, module, args, output):
         if self.offsets is None and self.abl_mask is None:
             return output
         h = output[0] if isinstance(output, tuple) else output
+        first = self.calls == 0
+        self.calls += 1
         if self.offsets is not None:
-            h = h + self.offsets.to(h.dtype)[:, None, :]
+            off = self.offsets.to(h.dtype)[:, None, :].expand(-1, h.shape[1], -1)
+            if self.c_only is not None and bool(self.c_only.any()):
+                keep = torch.ones(h.shape[0], h.shape[1], 1, dtype=h.dtype, device=h.device)
+                keep[self.c_only] = 0
+                if first:  # the first forward step starts at C
+                    keep[self.c_only, 0] = 1
+                off = off * keep
+            h = h + off
         if self.abl_mask is not None and bool(self.abl_mask.any()):
             u = self.u.to(h.dtype)
             proj = h @ u                                    # [B, T]
@@ -79,6 +94,8 @@ def main() -> None:
     p.add_argument("--mem-budget-gib", type=float, default=76.0, help="peak memory to aim for")
     p.add_argument("--expected-new-tokens", type=int, default=2500, help="for the per-row memory estimate")
     p.add_argument("--max-batch", type=int, default=64)
+    p.add_argument("--mem-factor", type=float, default=1.0,
+                   help="multiplies the per-row memory estimate (run A: the first batch at 1.0 ran out of memory at ~2x)")
     p.add_argument("--out", required=True)
     p.add_argument("--device", default="cuda")
     p.add_argument("--dtype", default="bfloat16")
@@ -115,13 +132,19 @@ def main() -> None:
             log["stopped_for_deadline"] = job["id"]
             break
         ids, c, sign = job["token_ids"], job["c_token"], job["target_sign"]
-        alpha = sign * a.strength * sd
-        conds = ([("unsteered", "none")] if a.unsteered else []) + [
-            (f"target_{a.strength:g}sd", "target"), (f"random_{a.strength:g}sd", "random"), ("mean_ablate", "mean_abl")]
+        if "conds" in job:  # [name, kind, vector, multiple of SD, where]
+            spec = {cd[0]: cd for cd in job["conds"]}
+        else:
+            spec = {"unsteered": ["unsteered", "none", None, 0, "from_c"]} if a.unsteered else {}
+            spec.update({f"target_{a.strength:g}sd": [f"target_{a.strength:g}sd", "add", "target", a.strength, "from_c"],
+                         f"random_{a.strength:g}sd": [f"random_{a.strength:g}sd", "add", "random", a.strength, "from_c"],
+                         "mean_ablate": ["mean_ablate", "mean_abl", None, 0, "from_c"]})
+        conds = [(name, cd[1]) for name, cd in spec.items()]
+        samples = job.get("samples", a.samples)
         if all((out / f"{job['id']}.{name}.json").exists() for name, _ in conds):  # resume: done in an earlier run
             log["calls"].append({"id": job["id"], "skipped_done": True})
             continue
-        rows = [(name, kind, k) for name, kind in conds for k in range(a.samples)]
+        rows = [(name, kind, k) for name, kind in conds for k in range(samples)]
         if cuda:
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
@@ -139,7 +162,7 @@ def main() -> None:
             base_gib = torch.cuda.memory_allocated() / 2**30
             # one row's cache ~ the prefilled cache; generation adds proportionally more
             cache_gib = sum(t.numel() * t.element_size() for t in _cache_tensors(base)) / 2**30
-            row_gib = cache_gib * (len(ids) + a.expected_new_tokens) / max(c, 1) + 0.2
+            row_gib = (cache_gib * (len(ids) + a.expected_new_tokens) / max(c, 1) + 0.2) * a.mem_factor
             bs = int(max(1, min(a.max_batch, len(rows), (a.mem_budget_gib - base_gib) // row_gib)))
         else:
             base_gib = cache_gib = row_gib = 0.0
@@ -155,17 +178,18 @@ def main() -> None:
             batch = rows[i:i + bs]
             offsets = torch.zeros(len(batch), u.numel(), device=a.device)
             abl = torch.zeros(len(batch), dtype=torch.bool, device=a.device)
-            for r, (_, kind, _) in enumerate(batch):
-                if kind == "target":
-                    offsets[r] = alpha * u
-                elif kind == "random":
-                    offsets[r] = alpha * rnd
+            c_only = torch.zeros(len(batch), dtype=torch.bool, device=a.device)
+            for r, (name, kind, _) in enumerate(batch):
+                cd = spec[name]
+                if kind == "add":  # multiple * SD * target_sign * (u or the random unit vector)
+                    offsets[r] = cd[3] * sd * sign * (u if cd[2] == "target" else rnd)
                 elif kind == "mean_abl":
                     abl[r] = True
+                c_only[r] = cd[4] == "c_only"
             try:
                 cache = copy.deepcopy(base)
                 cache.reorder_cache(torch.zeros(len(batch), dtype=torch.long, device=a.device))
-                steer.set(offsets=offsets, abl_mask=abl, u=u, m=m)
+                steer.set(offsets=offsets, abl_mask=abl, u=u, m=m, c_only=c_only)
                 torch.manual_seed(a.seed + i)
                 if hasattr(model.model, "rope_deltas"):
                     model.model.rope_deltas = None if rope0 is None else rope0.clone()

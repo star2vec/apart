@@ -41,7 +41,7 @@ app = modal.App("qwen36-steer")
               timeout=60 * MINUTES, max_containers=1)
 def steer(tag: str, layer: int, strengths: str, samples: int, max_new_tokens: int, c_only: bool,
           timeout_s: int, unsteered_only: bool = False, batched: bool = False, strength: float = 4.0,
-          in_batch_unsteered: bool = False) -> dict:
+          in_batch_unsteered: bool = False, mem_factor: float = 1.0) -> dict:
     started = time.time()
     acts_volume.reload()
     inp = Path(ACTS_DIR) / tag / "inputs"
@@ -69,7 +69,8 @@ def steer(tag: str, layer: int, strengths: str, samples: int, max_new_tokens: in
                "--jobs", str(inp / "jobs.json"), "--direction", str(inp / "direction.npz"),
                "--random-direction", str(inp / "random_direction.npz"), "--layer", str(layer),
                "--strength", str(strength), "--samples", str(samples), "--max-new-tokens", str(max_new_tokens),
-               "--out", str(out), "--deadline-s", str(int(timeout_s - (time.time() - started) - 180))]
+               "--out", str(out), "--deadline-s", str(int(timeout_s - (time.time() - started) - 180)),
+               "--mem-factor", str(mem_factor)]
         if in_batch_unsteered:
             cmd.append("--unsteered")
     code = subprocess.run(cmd).returncode
@@ -84,11 +85,16 @@ def steer(tag: str, layer: int, strengths: str, samples: int, max_new_tokens: in
 def main(jobs: str, tag: str, direction: str, random_direction: str, layer: int = 47, strengths: str = "2,4",
          samples: int = 4, max_new_tokens: int = 6144, c_only: bool = False, timeout_min: int = 45,
          unsteered_only: bool = False, batched: bool = False, strength: float = 4.0,
-         in_batch_unsteered: bool = False, go: bool = False) -> None:
+         in_batch_unsteered: bool = False, mem_factor: float = 1.0, go: bool = False) -> None:
     batch = json.loads(Path(jobs).read_text())
     n_cond = (1 if unsteered_only else 3 + (1 if in_batch_unsteered else 0) if batched
               else 1 + 2 * len(strengths.split(",")) + 1 + (1 if c_only else 0))
-    print(f"{len(batch)} calls x {n_cond} conditions x {samples} samples, layer {layer}, strengths {strengths} SD; "
+    if all("conds" in j for j in batch):  # per-call condition lists (steer_batched_worker.py)
+        rows = sum(len(j["conds"]) * j.get("samples", samples) for j in batch)
+        print(f"{len(batch)} calls, {rows} rows (per-call conditions), layer {layer}, mem factor {mem_factor}; ", end="")
+    else:
+        print(f"{len(batch)} calls x {n_cond} conditions x {samples} samples, layer {layer}, strengths {strengths} SD; ", end="")
+    print(
           f"longest prompt {max(len(j['token_ids']) + len(j.get('reply_ids', [])) for j in batch):,} tokens; hard timeout {timeout_min} min "
           f"= ${timeout_min / 60 * HOURLY_USD:.2f} at most")
     if not go:
@@ -101,7 +107,7 @@ def main(jobs: str, tag: str, direction: str, random_direction: str, layer: int 
     t0 = time.time()
     res = steer.with_options(timeout=timeout_min * MINUTES).remote(tag, layer, strengths, samples, max_new_tokens,
                                                                     c_only, timeout_min * MINUTES, unsteered_only,
-                                                                    batched, strength, in_batch_unsteered)
+                                                                    batched, strength, in_batch_unsteered, mem_factor)
     wall = (time.time() - t0) / 60
     log = res.pop("log") or {}
     print(json.dumps(res))
