@@ -47,6 +47,18 @@ Session 3 (`2026-10-25-session3-steering-and-ingredients.md`) extends this:
 - **The C probe beats the full saved thinking** at predicting resampled shares on hard cases
   (Spearman 0.74 vs 0.18).
 
+The final round (`2026-10-25-final-round.md`):
+- **The C probe's lead holds without the confidently wrong calls** (0.71–0.74 on hard cases).
+  The contrast direction, never fitted on the game, comes second (0.58–0.61).
+- **At A_call the contrast direction never beats the feedback baseline** (AUC 0.72 vs 0.90;
+  previous-REJECT rows 0.62 vs 0.78).
+- **The agent's own messages matter least.** Removing them lowers accept a little (hard
+  0.57 → 0.47); removing the peer's messages does about three times as much. Removing both cuts
+  accept to about 0.1, far more than the two parts added together.
+- **Reversing the previous feedback moves the verdict more than deleting it, and only one way.**
+  "Wrong" turned into "right" lowers accept (0.59 → 0.37); "right" turned into "wrong" changes
+  nothing (55 of 95 calls; the run was cut when the credit ran out).
+
 ## Reports, in order
 
 | Report | Contents |
@@ -59,6 +71,7 @@ Session 3 (`2026-10-25-session3-steering-and-ingredients.md`) extends this:
 | `2026-10-24-session2-and-steering-pilot.md` | Baselines vs resampled shares, flip base rates, steering direction, predictors by cut. vLLM session 2: thinking off, feedback edit, from A with the peer replayed. The session-2 cost overrun and its fix. Steering pilot and the sizing of the main run. |
 | `STATE.md`, section "Steering design A" | Run A (4 SD, 13 calls) and the 2 SD rerun: per-call tables, invalids, stop rule, crashes and fixes. |
 | `2026-10-25-session3-steering-and-ingredients.md` | Four predictors vs resampled shares; thinking of steered samples; steering session 3 (both ways at 2 SD, C only); the contrast direction from unrelated tasks; multi-layer mean-ablation; vLLM session 3 (ingredient removal at C). |
+| `2026-10-25-final-round.md` | Five predictors with and without the confidently wrong calls; the contrast direction at A_call vs feedback; vLLM session 4: own messages removed (complete), previous feedback reversed (55 of 95 calls); the credit running out. |
 
 ## Where the data lives
 
@@ -83,7 +96,10 @@ Everything below is under `agent-collusion/results/` (git-ignored) unless noted.
 | Steering items 3–4 | `steer/I34/out/` (incl. `contrast_direction.npz/.json`), `steer/I34/report.json`; jobs `steer/jobs_items34.json`; inputs `steer/contrast_prompts.json`, `c_acts_l47.npz`, `layer_directions.npz/.json`; Volume `/steer-I34/out` |
 | Thinking classes of steered samples | `steer/thinking_classes.json` |
 | Ingredient removal (vLLM session 3) | `step4_5/session3_edits.jsonl` (466 edited requests), `session3_responses.jsonl`, `session3_analysis.json`, `session3.log` |
-| Four predictors vs resampled shares | `step4_5/four_predictors.json` |
+| Four predictors vs resampled shares | `step4_5/four_predictors.json` (superseded by `five_predictors.json`) |
+| Five predictors (with and without confidently wrong calls) | `step4_5/five_predictors.json` |
+| Contrast direction at A_call | `steer/contrast_at_a_call.json` |
+| Own messages removed, feedback reversed (vLLM session 4) | `step4_5/session4_edits.jsonl` (197 edited requests), `session4_responses.jsonl` (157 done), `session4_analysis.json`, `session4.log` |
 | Figures (in git) | `reports/figures/step3/`, `step3_prev_reject/`, `step4_5/`, `step6/` |
 
 ## Unsteered check and the mean-ablation value
@@ -181,26 +197,31 @@ about twice that), so the 6144-token cap was lowered to 4096 from call 2 on.
 
 ## Next
 
-No GPU work is planned. Open questions that would need GPU time (ask first):
-- **Random controls.** Several random vectors at 2 SD on the hard cases where one random vector
-  also moved toward accept (rep011, rep013.bob.ep02): is accept where the model goes under any
-  perturbation there?
-- **Matching the contrast push.** The contrast direction at a strength matched in absolute size to
-  the C direction's 2 SD: is its weaker effect only a matter of step size?
-- **More samples.** 6 per condition leaves per-call numbers noisy.
+**No more GPU work: the Modal credit is used up and the workspace is disabled.** What's left is
+writing the sprint submission from the reports.
 
-On the Mac: the write-up for the sprint submission from the reports.
+Left open (each would need credit and approval):
+- **Finish item 5:** the 40 missing reversed-feedback calls (about 20–25 min, about $1.75).
+  Skipped by decision.
+- **Random controls:** several random vectors at 2 SD on the hard cases where one random vector
+  also moved toward accept (rep011, rep013.bob.ep02).
+- **Matching the contrast push:** the contrast direction at a step matched in absolute size to the
+  C direction's 2 SD.
+- **More samples:** 6 per steering condition leaves per-call numbers noisy.
 
 ## Modal
 
-Session 3 cost **$20.66**: steering items 1–2 $5.56, items 3–4 $1.79, vLLM item 5 ≈ $13.30 (its
-deadline was extended twice on approval). No job ran past its stop. Metered total **$70.66**
-(`modal billing summary`, 2026-10-25 02:00), all covered by credits, billed $0.00. The dashboard
-showed $30 before session 3, so about **$9.30** is left (check the dashboard).
+**Credit used up.** Metered total **$75.46** against about $75.39 of credits (`modal billing
+summary`, 2026-10-25). Modal disabled the workspace during the final vLLM session instead of
+billing, so the billed cost is **$0.00**.
+- **Session 3:** $20.66 (steering items 1–2 $5.56, items 3–4 $1.79, vLLM item 5 ≈ $13.30).
+- **Final round (vLLM session 4):** $4.80, cut short.
+- **The estimate was wrong:** the balance before the final round was about $4.70, not the $9.30
+  estimated from metered totals. The dashboard figure was never confirmed.
 
 ## Rules
 
-- Ask before any GPU job.
+- Ask before any GPU job, and confirm the remaining credit on the dashboard before sizing it.
 - Report GPU minutes and cost after each one.
 - Every GPU-backed runner checks its deadline before every call (and batch), has a process-level
   hard stop, and runs under `caffeinate`.
