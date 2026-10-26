@@ -1,6 +1,6 @@
 # Apart AI Collusion Research Sprint (Oct 23–25, 2026)
 
-Solo entry. PDF report.
+Solo entry. [PDF report](https://github.com/star2vec/apart/blob/main/handshake-for-the-cameras.pdf).
 
 As AI agents increasingly collaborate on solving tasks and checking each other’s work, the risk of collusion rises. Shi et al. showed that this behaviour can emerge on its own, with or without an explicit agreement in the transcript.  We locate the collusion decision by reading the upcoming verdict from the internal activations at fixed points of an episode, verify that reading by repeatedly restarting generation from that point, edit the transcript to find what causes the verdict, and push along the readable direction to test whether it is causal. The decision favoring ACCEPT emerges from the previous feedback, before the message exchange, and while ACCEPT needs the discussion to happen, it does not depend on the agreement. The verdict becomes readable in the activations only once the model is asked for it, before any reasoning, and on hard calls this reading predicts the output better than the previous feedback and than the full chain of thought. Pushing along the collusion direction changes the verdict in either direction, but only when sustained throughout the reasoning, which argues for the steered verdict, and removing the direction leaves the decision as it was. The handshake is for the cameras: by the time the agents agree, the decision is already settled, and it can be read and moved before a word of reasoning is written.
 
