@@ -59,61 +59,6 @@ Setup steps S1–S7 (serving, logging, rendering, timing). Steps 1–6 below are
 | S6. Boot, teacher forcing, timing | 5 paper verdict replies score −0.256/token vs −0.223 for our own samples (no token below −10); 2 episodes in 6.0 + 5.3 min, 0 failures, no pruning; ~$0.40 per early episode |
 | S7. Overnight: 2 × 10-episode trajectories in parallel | sequence 2 complete (37 min, mutual ACCEPT from episode 4); sequence 1 crashed in episode 1 on a 64k-token degenerate reply (1,882 repeated tool calls). See `reports/2026-10-23-overnight.md` |
 
-## Experiments: steps 1–6
-
-On the paper's 50 Qwen 3.6 main trajectories and their judge labels.
-
-| Step | Status |
-| --- | --- |
-| 1. Activation cache | done 2026-10-23: 200 passes (per run and agent: the last episode's communication-phase history and its last verdict prompt, each with its own phase's tool list), 14.26M tokens, whole passes (longest 93,645 tokens, peak 69.0 GiB); residual stream after layers 3, 7, …, 63 at 32,834 positions (A, A_call, every message end, C, verdict, feedback, reflection start/end, runner notices), 5.0 GiB bf16; index in `index.jsonl`. 39.6 H100-minutes, ~$2.61. Modal Volume `qwen36-activations:/cache-v1` |
-| 2. Probe at A | done (Mac): own verdict from A, 348 onset/before-onset rows, trajectory-grouped nested CV; selected-layer AUC 0.888 ± 0.023 vs feedback-features baseline 0.896 ± 0.020 (probe better in 9/25 folds), episode number 0.871, relaxation flag 0.818, shuffled null 0.504; positive control (previous reward) 0.924; probe + feedback 0.903 vs feedback 0.896 (+0.007, 19/25 folds), at A_call 0.910 (+0.013, 19/25). See `reports/2026-10-23-step2-probe-a.md` |
-| 3. Message-by-message probe, probe at C | done (Mac): per-position probes at A, each of 10 message slots and C, out-of-fold per row with the feedback baseline as reference; the probe first beats the feedback baseline at C (0.956 vs 0.905, +0.051 [0.030, 0.071]), overall and on both paths; no message slot does. C probe 0.953 ± 0.018; A↔C transfer partial (A→C 0.70, C→A 0.74); A_call's edge over A sits with the first speaker. Additions: last message vs C +0.048 [0.027, 0.069] (Alice +0.081, Bob +0.017 n.s.); C probe (layer 47) traced everywhere is flat until C, largest rise at C on 36/36 agreement onsets; agents with previous verdict reject (210 rows): first beats feedback at C (+0.110), A probe 0.774 vs feedback 0.784, A_call + feedback +0.038. See `reports/2026-10-23-step3-trace-and-c.md` |
-| 4. Resampling session (vLLM) | done 2026-10-24 with step 5's resampling: 830 requests, 11,680 samples, no capped replies, 44 invalid (task-phase tool calls on the completions endpoint); ≈134 H100-min, ≈$8.80 (cap raised to $15). Typical calls are decided at C: resampling reproduces the saved verdict 91% and tracks the C probe (ρ 0.87); "confidently wrong" probe calls follow the probe 9/10; reverted rejects and flips settle gradually through the thinking. See `reports/2026-10-24-step4-5-resampling.md` |
-| 5. Agreement lines removed | edited prompts (`tools/step5/`); C-probe score at C barely moves (step 6); variant B resampled at C: share ACCEPT 0.927 (11 paired calls 0.847 vs 0.966 unedited) |
-| 6. Projections session (transformers) | done 2026-10-23 (Volume `qwen36-activations:/step6`): 388 verdict calls + own thinking and 72 edited prompts, C probe (layer 47) per token, 27.0 H100-min (~$1.78). ACCEPT vs REJECT separation: C 0.942, first tenths of thinking 0.86 (fresh probe), last tenth 0.99; lock-in median at 92% of the thinking, about where the text first states the verdict; agreement lines removed barely move the C score (0.976 → 0.940); reverted calls often lean accept at C and reject in the thinking. See `reports/2026-10-23-step6-projections.md` |
-
-GPU spend to date: about 455–490 H100-minutes (~$30–32), including one failed 31-minute start and a session-2 overrun (see `reports/2026-10-24-session2-and-steering-pilot.md`).
-Run outputs (`agent-collusion/results/`) are git-ignored.
-
-### Session 2 and steering pilot (2026-10-24)
-
-On the random group the feedback baseline predicts resampled shares as well as the C probe
-(ρ 0.85 vs 0.87); the probe only wins on hard cases (0.74 vs −0.09). Telling an agent its previous
-verdict was right removes most onset accepts (0.88 → 0.33). With thinking off, flips mostly
-reject (0.69 → 0.37). Rerunning the communication phase from A with the peer replayed gives
-about the same shares as resampling from C (ρ 0.80). Steering pilot (3 calls, 4 samples):
-the C direction pushes one hard case to reject, random directions are inconclusive; the
-"ablation" condition was a push toward accept (fix: mean-ablation). See
-`reports/2026-10-24-session2-and-steering-pilot.md`.
-
-### Next (each GPU job waits for approval)
-
-- **D.** Mid-layer rerun of the thinking projections (a layer in 23–31), fresh probes per tenth,
-  vectors saved at a newline token in each tenth (transformers).
-- **Steering main run** (cap $10): 10 hard cases, 5 settled accepts, 3 settled rejects;
-  proposed as one batched generate per call with per-row steering and mean-ablation.
-
-## Source
-
-`agent-collusion/` is a copy of
-[SALT-NLP/agent-collusion](https://github.com/SALT-NLP/agent-collusion) at commit
-`5afb2c595aa3eff6b9b829a032f4f117b36ee54d` (2026-09-23), from Shi, Zhang & Yang (2026),
-*Emergent Collusion in Long-Horizon LLM Agent Interaction*. It is MIT-licensed; its
-license is kept at [agent-collusion/LICENSE](agent-collusion/LICENSE). Every change made
-for this project is listed below.
-
-### Changes to agent-collusion
-
-1. **Per-call wire log** (`experiments/llm.py`, enabled in `experiments/runner.py`,
-   noted in `run_config.llm_call_log` by `experiments/output.py`). Each run directory gets
-   `llm_calls.jsonl` next to `run.json`: for every LiteLLM call, a `request` record with
-   the exact JSON body sent to the server (messages including replayed
-   `reasoning_content`, tools, `tool_choice`, sampling), then a `response` record with the
-   raw server response before LiteLLM's conversion (including vLLM's `reasoning` field),
-   or an `error` record. Records are fsync'd as each call happens, so they survive a run
-   that dies mid-episode. No credentials or headers are written. Writes are serialised
-   with a lock so concurrent callers (`tools/resample.py`) cannot interleave lines.
-
 ## Model and serving
 
 | Setting | Value |
@@ -162,6 +107,3 @@ for this project is listed below.
 4. **Probes.** L2 logistic regression with cross-validation grouped by trajectory (5 folds × 5
    repeats). The L2 strength and the layer are chosen inside the training folds. Scores are
    out of fold.
-
-Secrets live in Modal (`huggingface`, `vllm-api-key`) and in `agent-collusion/.env`,
-which is git-ignored.
