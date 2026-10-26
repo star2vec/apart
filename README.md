@@ -1,44 +1,16 @@
 # Apart AI Collusion Research Sprint (Oct 23–25, 2026)
 
-Solo entry. Runs the two-agent collusion environment against a self-hosted
-Qwen3.6-27B served with vLLM on Modal, and studies the paper's 50 released Qwen 3.6
-trajectories from the inside: residual-stream probes, resampling and edited transcripts.
+Solo entry. PDF report.
 
-**Question.** Does collusion that starts with an explicit agreement look different from
-collusion that starts without one? Is the decision to collude already settled before the
-agreement? Is there a grey area between the agreement and the ACCEPT verdict?
+As AI agents increasingly collaborate on solving tasks and checking each other’s work, the risk of collusion rises. Shi et al. showed that this behaviour can emerge on its own, with or without an explicit agreement in the transcript.  We locate the collusion decision by reading the upcoming verdict from the internal activations at fixed points of an episode, verify that reading by repeatedly restarting generation from that point, edit the transcript to find what causes the verdict, and push along the readable direction to test whether it is causal. The decision favoring ACCEPT emerges from the previous feedback, before the message exchange, and while ACCEPT needs the discussion to happen, it does not depend on the agreement. The verdict becomes readable in the activations only once the model is asked for it, before any reasoning, and on hard calls this reading predicts the output better than the previous feedback and than the full chain of thought. Pushing along the collusion direction changes the verdict in either direction, but only when sustained throughout the reasoning, which argues for the steered verdict, and removing the direction leaves the decision as it was. The handshake is for the cameras: by the time the agents agree, the decision is already settled, and it can be read and moved before a word of reasoning is written.
 
-## Findings so far (steps 1–6)
-
-Points in an episode: **A** = start of the communication phase; **C** = the verdict turn,
-right before its thinking. "Feedback baseline" = a logistic regression on the previous
-episode's outcome (both verdicts, whether each was right, reward, episode number).
-
-1. **Before the verdict prompt, the activations add little beyond the history.** At A and at
-   every message of the exchange, a probe for the agent's coming verdict is level with the
-   feedback baseline (0.89 vs 0.90 AUC). On top of the baseline it adds about +0.01, or +0.04
-   for agents switching from reject at their first turn.
-2. **The verdict becomes readable when it is asked for.** At C, before any thinking, the probe
-   beats the baseline (0.956 vs 0.905, interval above 0) on both agreement and no-agreement
-   paths. It also beats the last message, which has seen the same conversation (+0.05), and
-   word-count models of the messages (+0.05–0.07). For the agent who wrote the last message,
-   the verdict is already about as readable in its own final message, mostly via its words.
-3. **No difference between the paths until C.** Agreement and no-agreement onsets look alike
-   through the exchange. The C probe stays flat through the messages and rises at C, after the
-   agreement message, on all 36 agreement-onset curves.
-4. **For a typical verdict call, the outcome is set at C.** 16 fresh samples from C reproduce the
-   saved verdict 91% of the time, and the C probe predicts the resampled share (ρ = 0.87). Calls
-   where the probe looked confidently wrong are calls where the paper's single sample was the
-   unlikely outcome: resampling follows the probe in 9 of 10.
-5. **The grey area is in a minority of calls.** Reverted rejects (after onset) and "flips"
-   (the thinking first says reject, then accepts; 22–26% of accepts) are open at C. The saved
-   thinking moves them towards their outcome gradually, through to the end. An early
-   "I must reject" in a flip is not binding: 64% of continuations from just after it still
-   accept.
-6. **Removing the agreement lines barely changes the verdict.** That covers the judge-quoted
-   lines plus every "accept…"/"agree…" sentence. The C-probe score at C goes from 0.976 to
-   0.940, and resampled ACCEPT stays at 0.93 overall (one large drop in 36).
-
+Main contributions:
+1. A timeline of the decision to collude. It forms from the previous episode’s feedback before the agents talk, and it depends on the model discussing, not on explicit agreement.
+2. A probe at the decision prompt. It is validated against resampled behaviour and, on hard calls, it predicts the verdict better than the previous feedback and the model’s full chain of thought.
+3. Causal evidence that the readable direction is steerable and can change the verdict in both directions, but only when pushed through the reasoning, and ablating it leaves the decision as it was.
+4. The decision can also be read and changed by a general approval/rejection direction fitted on unrelated review tasks and never on this setup.
+5. Activation cache, per-call logging, prompt reconstruction, and resampling for a public emergent collusion environment, released with the code.
+   
 Reports: `reports/` (one per step); numbers and per-call data in `agent-collusion/results/`
 (git-ignored).
 
