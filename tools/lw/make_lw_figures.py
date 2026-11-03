@@ -33,6 +33,7 @@ FIG = ROOT / "reports" / "figures"
 ACCEPT, REJECT = "#1a9641", "#d7191c"
 CONTROL = "#8c8c8c"
 BLUE, PURPLE, ORANGE, BLACK = "#2c7bb6", "#7b3294", "#e66101", "#222222"
+BROWN, TEAL = "#8c510a", "#35978f"  # Fig 3 hard groups, kept off the Fig 1 path colours and ACCEPT/REJECT
 
 SLOTS = [f"s{k}" for k in range(1, 11)]
 CURVE = ["A"] + SLOTS + ["C"]
@@ -183,9 +184,9 @@ def fig3():
 
     fig, ax = plt.subplots(figsize=(W, 4.4))
     ax.axvspan(92, 96, color=CONTROL, alpha=0.2, lw=0, label="decision-prompt probe lock-in (median)")
-    for name, g, col, style in (("reverted, REJECT verdicts", "reverted_reject", BLUE, dict(marker="o")),
+    for name, g, col, style in (("reverted, REJECT verdicts", "reverted_reject", BROWN, dict(marker="o")),
                                 ("flips", "flip", ORANGE, dict(marker="o")),
-                                ("confidently wrong", "confident_wrong", PURPLE, dict(marker="o")),
+                                ("confidently wrong", "confident_wrong", TEAL, dict(marker="D")),
                                 ("random, collusion start", "random_onset", CONTROL, dict(marker="s")),
                                 ("random, before collusion", "random_before_onset", CONTROL,
                                  dict(marker="^", ls="--"))):
@@ -287,14 +288,28 @@ def fig4():
 
 # ------------------------------------------------------------------------ Fig 5: flips
 
-def fig5():
+SELECTED_FLIPS = ["call.rep003.bob.ep04", "call.rep011.alice.ep02", "call.rep024.bob.ep02",
+                  "call.rep049.alice.ep03", "call.rep048.alice.ep03"]
+
+
+def plain_title(job):
+    run, agent, ep = job.replace("call.", "").split(".")
+    return (f"trajectory {int(run[3:])}\n{'first' if agent == 'alice' else 'second'} agent\n"
+            f"episode {int(ep[2:])}")
+
+
+def fig5(selected=False):
     fl = json.load(open(RES / "step4_5" / "flips.json"))["main_flips"]
+    if selected:
+        by_job = {x["job"]: x for x in fl}
+        fl = [by_job[j] for j in SELECTED_FLIPS]
     calls = {c["job"]: c for c in map(json.loads, open(RES / "step6" / "calls.jsonl")) if c["kind"] == "call"}
     acts = RES / "step6" / "acts"
     colour = {"accept": ACCEPT, "reject": REJECT}
-    cols = 4
+    cols = len(fl) if selected else 4
     rows_n = int(np.ceil(len(fl) / cols))
-    fig, axes = plt.subplots(rows_n, cols, figsize=(W, 1.35 * rows_n + 0.6), sharex=True, sharey=True)
+    fig, axes = plt.subplots(rows_n, cols, figsize=(W, 1.35 * rows_n + (1.5 if selected else 0.6)),
+                             sharex=True, sharey=True, squeeze=False)
     for ax, x in zip(axes.flat, fl):
         c = calls[x["job"]]
         lg = a6.read_safetensors(acts / f"{x['job']}.safetensors")["probe_logits"].astype(float)
@@ -304,9 +319,12 @@ def fig5():
         ax.axvline(x["first_any"], color=colour[x["first_any_polarity"]], lw=1.3)
         if x["first_final"] is not None:
             ax.axvline(x["first_final"], color=colour[x["verdict"]], lw=1.3, ls="--")
-        run, agent, ep = x["job"].replace("call.", "").split(".")
-        ax.set_title(f"{run} {agent.capitalize()} ep{int(ep[2:])}\n{TYPE[x['type']]} → {x['verdict'].upper()}",
-                     fontsize=7.5, pad=3)
+        if selected:
+            title = f"{plain_title(x['job'])}\n{TYPE[x['type']]}\n→ {x['verdict'].upper()}"
+        else:
+            run, agent, ep = x["job"].replace("call.", "").split(".")
+            title = f"{run} {agent.capitalize()} ep{int(ep[2:])}\n{TYPE[x['type']]} → {x['verdict'].upper()}"
+        ax.set_title(title, fontsize=7.5, pad=3)
         ax.set_ylim(0, 1)
         ax.set_xlim(0, 1)
         ax.set_xticks([0, 0.5, 1], ["0", "0.5", "1"])
@@ -317,7 +335,8 @@ def fig5():
     for ax in axes.flat[len(fl) - cols:len(fl)]:
         ax.tick_params(labelbottom=True)
     fig.supxlabel("position in the decision call's thinking (fraction)", fontsize=10)
-    fig.supylabel("decision-prompt probe P(accept), smoothed", fontsize=10)
+    fig.supylabel("decision-prompt probe\nP(accept), smoothed" if selected
+                  else "decision-prompt probe P(accept), smoothed", fontsize=10)
     fig.legend(handles=[Line2D([], [], color=BLACK, lw=1.3, label="first stated decision"),
                         Line2D([], [], color=BLACK, lw=1.3, ls="--", label="first statement of the final verdict"),
                         Patch(color=ACCEPT, label="ACCEPT"), Patch(color=REJECT, label="REJECT"),
@@ -325,7 +344,7 @@ def fig5():
                         Line2D([], [], color=CONTROL, ls=":", lw=1, label="score at decision prompt")],
                loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3, fontsize=9, columnspacing=1.2)
     fig.tight_layout(h_pad=0.6, w_pad=0.4)
-    save(fig, FIG / "step4_5" / "flips_lw.png")
+    save(fig, FIG / "step4_5" / ("flips_selected_lw.png" if selected else "flips_lw.png"))
 
 
 if __name__ == "__main__":
@@ -334,3 +353,4 @@ if __name__ == "__main__":
     fig3()
     fig4()
     fig5()
+    fig5(selected=True)
